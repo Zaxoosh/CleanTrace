@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-labelledby="title desc">
+  <title id="title">CleanTrace Milestone 1 terminal output</title>
+  <desc id="desc">Example terminal output showing a CleanTrace scan summary and recommended actions.</desc>
+  <rect width="960" height="540" fill="#0f172a"/>
+  <rect x="32" y="28" width="896" height="484" rx="10" fill="#111827" stroke="#334155"/>
+  <circle cx="58" cy="52" r="6" fill="#ef4444"/>
+  <circle cx="80" cy="52" r="6" fill="#f59e0b"/>
+  <circle cx="102" cy="52" r="6" fill="#22c55e"/>
+  <text x="128" y="57" fill="#cbd5e1" font-family="Consolas, monospace" font-size="15">cleantrace scan all --profile default --depth quick</text>
+  <rect x="58" y="86" width="844" height="86" rx="7" fill="#0b1220" stroke="#06b6d4"/>
+  <text x="78" y="116" fill="#67e8f9" font-family="Consolas, monospace" font-size="22" font-weight="700">CleanTrace</text>
+  <text x="78" y="146" fill="#e5e7eb" font-family="Consolas, monospace" font-size="16">Find public exposure, understand risk, generate removal requests, and track cleanup.</text>
+  <rect x="58" y="194" width="844" height="94" rx="7" fill="#0b1220" stroke="#22c55e"/>
+  <text x="78" y="225" fill="#e5e7eb" font-family="Consolas, monospace" font-size="17" font-weight="700">Summary</text>
+  <text x="78" y="253" fill="#cbd5e1" font-family="Consolas, monospace" font-size="15">Profile: default    Findings: 0 total, 0 high or critical    Exposure score: 0/100 (low)</text>
+  <rect x="58" y="310" width="844" height="156" rx="7" fill="#0b1220" stroke="#22c55e"/>
+  <text x="78" y="340" fill="#e5e7eb" font-family="Consolas, monospace" font-size="17" font-weight="700">Top 5 actions to reduce exposure</text>
+  <text x="78" y="371" fill="#cbd5e1" font-family="Consolas, monospace" font-size="14">1. Review public profiles for real name, location, employer, family links, and contact details.</text>
+  <text x="78" y="397" fill="#cbd5e1" font-family="Consolas, monospace" font-size="14">2. Remove or hide unused accounts that reuse current usernames.</text>
+  <text x="78" y="423" fill="#cbd5e1" font-family="Consolas, monospace" font-size="14">3. Use distinct usernames for sensitive communities and public professional profiles.</text>
+  <text x="78" y="449" fill="#cbd5e1" font-family="Consolas, monospace" font-size="14">4. Export a report and track cleanup actions until each item is resolved.</text>
+</svg>

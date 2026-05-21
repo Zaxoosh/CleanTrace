@@ -1,0 +1,152 @@
+- name: GitHub
+  url: https://github.com
+  check_url: https://github.com/{username}
+  username_claimed_regex: '<meta property="og:url" content="https://github.com/{username}"'
+  username_unclaimed_regex: "Not Found"
+  expected_status: [200]
+  tags: [dev, professional]
+  country: US
+  enabled_by_default: true
+  confidence_rules: {status_and_pattern: 92}
+  notes: Public developer profiles can reveal commit emails, organisations, and linked domains.
+- name: GitLab
+  url: https://gitlab.com
+  check_url: https://gitlab.com/{username}
+  username_claimed_regex: '<meta property="og:url" content="https://gitlab.com/{username}"'
+  username_unclaimed_regex: "Page Not Found"
+  expected_status: [200]
+  tags: [dev, professional]
+  country: US
+  enabled_by_default: true
+  confidence_rules: {status_and_pattern: 90}
+- name: Reddit
+  url: https://www.reddit.com
+  check_url: https://www.reddit.com/user/{username}/
+  username_claimed_regex: '"name":"{username}"'
+  username_unclaimed_regex: "Sorry, nobody on Reddit goes by that name"
+  expected_status: [200]
+  tags: [social, forum]
+  country: US
+  enabled_by_default: true
+  confidence_rules: {status_and_pattern: 86}
+- name: Steam
+  url: https://steamcommunity.com
+  check_url: https://steamcommunity.com/id/{username}
+  username_claimed_regex: "steamcommunity.com/id/{username}"
+  username_unclaimed_regex: "The specified profile could not be found"
+  expected_status: [200]
+  tags: [gaming, social]
+  country: US
+  enabled_by_default: true
+  confidence_rules: {status_and_pattern: 84}
+- name: YouTube
+  url: https://www.youtube.com
+  check_url: https://www.youtube.com/@{username}
+  username_claimed_regex: '"canonicalBaseUrl":"/@{username}"'
+  username_unclaimed_regex: "This page isn't available"
+  expected_status: [200]
+  tags: [social, video]
+  country: US
+  enabled_by_default: true
+  confidence_rules: {status_and_pattern: 82}
+- name: TikTok
+  url: https://www.tiktok.com
+  check_url: https://www.tiktok.com/@{username}
+  username_claimed_regex: '"uniqueId":"{username}"'
+  username_unclaimed_regex: "Couldn't find this account"
+  expected_status: [200]
+  tags: [social, video]
+  country: CN
+  enabled_by_default: true
+  confidence_rules: {status_and_pattern: 82}
+- name: Instagram
+  url: https://www.instagram.com
+  check_url: https://www.instagram.com/{username}/
+  username_claimed_regex: '"alternateName":"@{username}"'
+  username_unclaimed_regex: "Sorry, this page isn't available"
+  expected_status: [200]
+  tags: [social, images]
+  country: US
+  enabled_by_default: true
+  confidence_rules: {status_and_pattern: 80}
+- name: X/Twitter
+  url: https://x.com
+  check_url: https://x.com/{username}
+  username_claimed_regex: "https://x.com/{username}"
+  username_unclaimed_regex: "This account doesn.?t exist"
+  expected_status: [200]
+  tags: [social]
+  country: US
+  enabled_by_default: true
+  confidence_rules: {status_and_pattern: 76}
+- name: Pinterest
+  url: https://www.pinterest.com
+  check_url: https://www.pinterest.com/{username}/
+  username_claimed_regex: "pinterest.com/{username}"
+  username_unclaimed_regex: "Sorry, we couldn.?t find that page"
+  expected_status: [200]
+  tags: [social, images]
+  country: US
+  enabled_by_default: true
+  confidence_rules: {status_and_pattern: 80}
+- name: Twitch
+  url: https://www.twitch.tv
+  check_url: https://www.twitch.tv/{username}
+  username_claimed_regex: "twitch.tv/{username}"
+  username_unclaimed_regex: "Sorry. Unless you.ve got a time machine"
+  expected_status: [200]
+  tags: [gaming, streaming]
+  country: US
+  enabled_by_default: true
+  confidence_rules: {status_and_pattern: 78}
+- name: Medium
+  url: https://medium.com
+  check_url: https://medium.com/@{username}
+  username_claimed_regex: "medium.com/@{username}"
+  username_unclaimed_regex: "Out of nothing, something"
+  expected_status: [200]
+  tags: [blog, professional]
+  country: US
+  enabled_by_default: true
+  confidence_rules: {status_and_pattern: 82}
+- name: StackOverflow
+  url: https://stackoverflow.com
+  check_url: https://stackoverflow.com/users/{username}
+  username_claimed_regex: "Stack Overflow"
+  username_unclaimed_regex: "Page not found"
+  expected_status: [200]
+  tags: [dev, professional]
+  country: US
+  enabled_by_default: true
+  confidence_rules: {status_and_pattern: 58}
+  notes: StackOverflow canonical URLs usually include a numeric id; this definition is lower confidence.
+- name: HackerNews
+  url: https://news.ycombinator.com
+  check_url: https://news.ycombinator.com/user?id={username}
+  username_claimed_regex: '<td valign="top">user:</td>'
+  username_unclaimed_regex: "No such user"
+  expected_status: [200]
+  tags: [dev, forum]
+  country: US
+  enabled_by_default: true
+  confidence_rules: {status_and_pattern: 86}
+- name: Gravatar
+  url: https://gravatar.com
+  check_url: https://gravatar.com/{username}
+  username_claimed_regex: "gravatar.com/{username}"
+  username_unclaimed_regex: "Profile not found"
+  expected_status: [200]
+  tags: [profile, images]
+  country: US
+  enabled_by_default: true
+  confidence_rules: {status_and_pattern: 78}
+- name: WordPress
+  url: https://profiles.wordpress.org
+  check_url: https://profiles.wordpress.org/{username}/
+  username_claimed_regex: "profiles.wordpress.org/{username}"
+  username_unclaimed_regex: "Page not found"
+  expected_status: [200]
+  tags: [blog, professional]
+  country: US
+  enabled_by_default: true
+  confidence_rules: {status_and_pattern: 82}
