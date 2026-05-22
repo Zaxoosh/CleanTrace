@@ -7,6 +7,15 @@ from pathlib import Path
 from cleantrace.models import Finding, Profile
 from cleantrace.scoring import exposure_score, score_band, top_actions
 
+REPORT_SECTIONS = [
+    ("Public Web Discovery", {"web_discovery"}),
+    ("Phone Exposure", {"phone_exposure"}),
+    ("Breach & Dark Web Intelligence", {"breach_intel", "hibp_email"}),
+    ("Tor Public URL Check", {"tor_public_check"}),
+    ("Manual Evidence", {"manual_evidence"}),
+    ("Data Broker Opportunities", {"data_broker"}),
+]
+
 
 def render_markdown(profile: Profile, findings: list[Finding]) -> str:
     score = exposure_score(findings, profile)
@@ -21,6 +30,8 @@ def render_markdown(profile: Profile, findings: list[Finding]) -> str:
         f"- Risk score: **{score}/100 ({band})**",
         f"- Findings reviewed: **{len(findings)}**",
         "- Scope: public exposure self-assessment using local CleanTrace data.",
+        "- Findings are leads for review. This is a lead, not proof.",
+        "- Removal is not guaranteed. Breach intelligence is metadata-only.",
         "",
         "## Highest-Risk Exposures",
         "",
@@ -36,11 +47,75 @@ def render_markdown(profile: Profile, findings: list[Finding]) -> str:
                 f"- Severity: {finding.severity}",
                 f"- Confidence: {finding.confidence}%",
                 f"- Source: {finding.source_plugin}",
+                f"- Provider: {finding.evidence.get('provider', finding.source_plugin)}",
                 f"- URL: {finding.url or 'n/a'}",
+                "- What matched: "
+                f"{finding.evidence.get('matched_identifiers', 'redacted/local metadata')}",
+                f"- Why it matters: {finding.description}",
                 f"- Remediation: {finding.remediation}",
                 "",
             ]
         )
+    if profile.risk_sensitivity == "protected-role":
+        lines.extend(
+            [
+                "## Protected-Role Priorities",
+                "",
+                (
+                    "Prioritise reducing links between real name, role, home location, "
+                    "phone number, and personal social accounts."
+                ),
+                "",
+            ]
+        )
+    for title, sources in REPORT_SECTIONS:
+        section_findings = [
+            finding
+            for finding in findings
+            if finding.source_plugin in sources or set(finding.tags) & sources
+        ]
+        lines.extend([f"## {title}", ""])
+        if not section_findings:
+            lines.append("No findings recorded for this section.")
+            lines.append("")
+            continue
+        for finding in section_findings:
+            lines.extend(render_finding_block(finding))
+    review_queue = [
+        finding
+        for finding in findings
+        if "needs_manual_review" in finding.tags or "needs-review" in finding.tags
+    ]
+    lines.extend(["## Manual Review Queue", ""])
+    if review_queue:
+        for finding in review_queue:
+            lines.append(f"- {finding.id}: {finding.title} ({finding.confidence}% confidence)")
+    else:
+        lines.append("No manual review leads recorded.")
+    lines.extend(
+        [
+            "",
+            "## False Positive Checklist",
+            "",
+            "- Does the result contain an exact email, phone number, or username?",
+            "- Does the page link multiple identifiers, such as name plus location?",
+            "- Could the name or username belong to another person?",
+            "- Has the finding been confirmed before starting a removal request?",
+            "",
+            "## Provider Disclosure",
+            "",
+            (
+                "Third-party APIs only receive identifiers for modules you explicitly enable. "
+                "CleanTrace does not store leaked records, passwords, hashes, tokens, "
+                "or provider raw responses."
+            ),
+            (
+                "Tor URL checks only inspect user-provided public pages. They do not crawl, "
+                "follow links, download files, or interact with forms."
+            ),
+            "",
+        ]
+    )
     lines.extend(["## All Findings", ""])
     if findings:
         lines.append("| ID | Severity | Confidence | Source | Title | URL |")
@@ -72,11 +147,30 @@ def render_markdown(profile: Profile, findings: list[Finding]) -> str:
             "",
             (
                 "CleanTrace does not guarantee complete coverage, does not delete content, "
-                "and does not search private systems. Treat findings as leads for manual review."
+                "and does not search private systems. Treat findings as leads for manual review. "
+                "Breach intelligence is metadata-only."
             ),
         ]
     )
     return "\n".join(lines) + "\n"
+
+
+def render_finding_block(finding: Finding) -> list[str]:
+    evidence = finding.evidence
+    return [
+        f"### {finding.title}",
+        "",
+        f"- Source: {finding.source_plugin}",
+        f"- Provider: {evidence.get('provider', finding.source_plugin)}",
+        f"- Timestamp: {finding.last_seen.isoformat()}",
+        f"- Confidence: {finding.confidence}%",
+        f"- Severity: {finding.severity}",
+        f"- What matched: {evidence.get('matched_identifiers', 'redacted/local metadata')}",
+        f"- URL: {finding.url or 'n/a'}",
+        f"- Why it matters: {finding.description}",
+        f"- Recommended action: {finding.remediation}",
+        "",
+    ]
 
 
 def render_html(profile: Profile, findings: list[Finding]) -> str:

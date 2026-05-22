@@ -1,0 +1,76 @@
+- name: 192.com
+  country: UK
+  category: people-search
+  opt_out_url: https://www.192.com/misc/privacy-policy/
+  privacy_url: https://www.192.com/misc/privacy-policy/
+  contact_email: privacy@192.com
+  required_info:
+    - listing URL
+    - name
+    - address details shown on listing
+  expected_response_days: 30
+  supports_gdpr: true
+  supports_uk_gdpr: true
+  manual_only: true
+  notes: Manual opt-out or privacy request. Do not automate form submissions.
+  risk_notes: Can link real name to home address or phone details.
+- name: Open Electoral Register
+  country: UK
+  category: public-register-guidance
+  opt_out_url: https://www.gov.uk/electoral-register/opt-out-of-the-open-register
+  privacy_url: https://www.gov.uk/electoral-register
+  contact_email: ""
+  required_info:
+    - local council electoral registration contact
+  expected_response_days: 30
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  manual_only: true
+  notes: Guidance for opting out of the open register through the local council.
+  risk_notes: Open-register listings can be reused by people-search services.
+- name: Companies House
+  country: UK
+  category: public-register-guidance
+  opt_out_url: https://www.gov.uk/guidance/applying-to-protect-your-personal-information-on-the-companies-house-register
+  privacy_url: https://www.gov.uk/government/organisations/companies-house/about/personal-information-charter
+  contact_email: ""
+  required_info:
+    - company number
+    - officer name
+    - evidence for protected information request where required
+  expected_response_days: 30
+  supports_gdpr: false
+  supports_uk_gdpr: true
+  manual_only: true
+  notes: Public register data has statutory retention limits; suppression is not guaranteed.
+  risk_notes: Can expose service addresses, roles, and historical appointments.
+- name: Google Outdated Content
+  country: Global
+  category: search-engine-removal
+  opt_out_url: https://search.google.com/search-console/remove-outdated-content
+  privacy_url: https://policies.google.com/privacy
+  contact_email: ""
+  required_info:
+    - URL
+    - proof content was removed or changed at source
+  expected_response_days: 14
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  manual_only: true
+  notes: Use after content has been removed or changed at the source.
+  risk_notes: Search snippets can keep old identifiers visible after source cleanup.
+- name: Bing Content Removal
+  country: Global
+  category: search-engine-removal
+  opt_out_url: https://www.bing.com/webmasters/tools/contentremoval
+  privacy_url: https://privacy.microsoft.com/privacystatement
+  contact_email: ""
+  required_info:
+    - URL
+    - removed or changed source content
+  expected_response_days: 14
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  manual_only: true
+  notes: Use for stale Bing cached results after source cleanup.
+  risk_notes: Search result caches can extend exposure duration.

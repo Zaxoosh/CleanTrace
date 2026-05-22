@@ -20,6 +20,20 @@ CleanTrace encrypts raw profile identifiers and linked account tokens locally, b
 
 Google Takeout archives can contain highly sensitive account, location, photo, and sharing data. CleanTrace parses them locally, but users should keep the original archive private and delete it when no longer needed.
 
+Manual evidence files can contain secrets or leaked material. CleanTrace attempts to redact
+passwords, token-like strings, private keys, and hash-like values before storing metadata, but users
+should avoid importing raw leaked datasets and should delete unsafe source files after review.
+
+Tor public URL checks require a user-managed Tor SOCKS proxy. CleanTrace does not bundle Tor, does
+not crawl onion sites, does not follow links, and does not download files. If a URL appears unsafe or
+illegal, CleanTrace stores only a warning finding.
+
+Third-party breach-intelligence providers are disabled by default. Non-HIBP providers require a
+local API key and explicit terms acceptance. Provider responses must be treated as sensitive and
+CleanTrace stores metadata-only findings.
+
 ## Non-Goals
 
-CleanTrace will not add features for credential attacks, CAPTCHA bypass, password reset abuse, hidden scraping, browser cookie theft, leaked database scraping, or non-consensual target discovery.
+CleanTrace will not add features for credential attacks, CAPTCHA bypass, password reset abuse,
+hidden scraping, browser cookie theft, leaked database scraping, dark-web marketplace crawling,
+illegal-content access, or non-consensual target discovery.

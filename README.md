@@ -15,6 +15,7 @@ It helps you find public exposure, understand risk, generate removal requests, a
 - [First Run](#first-run)
 - [Profiles and Consent](#profiles-and-consent)
 - [Scanning](#scanning)
+- [Advanced Exposure Discovery](#advanced-exposure-discovery)
 - [Findings and Reports](#findings-and-reports)
 - [Removal Requests](#removal-requests)
 - [GitHub Connector](#github-connector)
@@ -54,6 +55,12 @@ CleanTrace currently supports:
 - GitHub account linking through official APIs.
 - Public GitHub profile and repository exposure checks.
 - Google Takeout ZIP import, parsed locally.
+- Phone number country-code parsing and safe search variants.
+- Public Web Discovery through configured search APIs such as SearXNG, Brave, Bing,
+  Google Custom Search, or SerpAPI.
+- Metadata-only Breach & Dark Web Intelligence provider layer.
+- Explicit user-provided Tor public URL checks with no crawling.
+- Manual evidence import for local screenshots, exports, and saved pages.
 - Local findings database with confidence, severity, evidence, timestamps, and remediation.
 - Markdown and HTML reports.
 - Removal request drafting and status tracking.
@@ -70,6 +77,8 @@ It does not:
 - Search arbitrary people without a consent profile.
 - Claim to remove someone from the internet.
 - Scrape leaked databases or store raw breach records.
+- Crawl dark-web sites or scrape illegal marketplaces.
+- Download credential dumps.
 - Store passwords.
 - Attempt logins.
 - Abuse password reset flows.
@@ -196,6 +205,9 @@ cleantrace scan all --profile default --depth quick
 
 - Username discovery for profile usernames.
 - HIBP email checks if an API key is configured and the plugin is enabled.
+- Phone validation and search-variant generation.
+- Public Web Discovery if enabled and configured.
+- Breach & Dark Web Intelligence if enabled and configured.
 - Linked GitHub account checks if one is linked and the plugin is enabled.
 
 ### Depth Levels
@@ -265,17 +277,125 @@ This uses the HIBP Pwned Passwords k-anonymity range API. CleanTrace sends only 
 
 Avoid passing passwords with `--password` unless you understand shell history risks. The prompt is safer.
 
-### Commands Not Implemented Yet
+## Advanced Exposure Discovery
 
-These commands are present in the CLI but do not perform scans yet:
+Advanced Exposure Discovery expands CleanTrace beyond username checks while keeping the same
+consent and local-first model. Each scan is tied to a local profile. Third-party providers are
+disabled by default and only receive identifiers when you explicitly enable and configure them.
+
+### Phone Numbers
+
+CleanTrace uses `phonenumbers` to parse country codes and formats. It stores phone numbers
+encrypted, plus local metadata such as E.164 format, national format, region, calling code, and
+validity.
 
 ```powershell
-cleantrace scan phone
-cleantrace scan name
-cleantrace scan domain
+cleantrace profile phone add --profile default --country GB "07700 900123"
+cleantrace profile phone list --profile default
+cleantrace scan phone --profile default
+cleantrace scan phone "+14155552671" --country US
 ```
 
-They are intentionally inactive until safe API-backed approaches are added.
+Supported country input examples include `GB`, `United Kingdom`, `US`, `Germany`, and `+44`.
+CleanTrace does not send SMS, place calls, or perform active phone verification.
+
+### Public Web Discovery
+
+Public Web Discovery generates structured search queries from your consent profile, then sends
+those queries to a configured search provider. It does not scrape Google result pages directly.
+
+Enable the module and a provider:
+
+```powershell
+cleantrace plugins enable web_discovery
+cleantrace config set web_discovery.providers.searxng.enabled true
+cleantrace config set web_discovery.providers.searxng.base_url http://localhost:8080
+cleantrace config set web_discovery.default_provider searxng
+```
+
+Run scans:
+
+```powershell
+cleantrace scan web --profile default --depth quick
+cleantrace scan web --profile default --depth standard --query-set identity
+cleantrace scan web --profile default --query-set phone
+cleantrace scan web --profile default --query-set username
+cleantrace scan web --profile default --query-set email --json
+```
+
+Supported provider keys:
+
+- `web_discovery.providers.searxng.base_url`
+- `web_discovery.providers.brave.api_key`
+- `web_discovery.providers.bing.api_key`
+- `web_discovery.providers.google_cse.api_key`
+- `web_discovery.providers.google_cse.search_engine_id`
+- `web_discovery.providers.serpapi.api_key`
+
+Results are deduplicated by canonical URL, classified, confidence-scored, and stored as leads.
+Common classifications include `data_broker`, `social_profile`, `professional_profile`,
+`public_document`, `paste_or_dump_reference`, and `needs_manual_review`.
+
+### Breach & Dark Web Intelligence
+
+This layer is metadata-only. It can query lawful breach-intelligence APIs, but CleanTrace does not
+store leaked records, passwords, password hashes, tokens, private keys, or provider raw responses.
+
+```powershell
+cleantrace plugins enable breach_intel
+cleantrace config set breach_intel.providers.hibp.enabled true
+cleantrace config set breach_intel.providers.hibp.api_key your_hibp_key
+cleantrace scan intel --profile default --provider hibp
+```
+
+LeakCheck, DeHashed, and Intelligence X connectors are present as disabled-by-default provider
+layers. They require a user-supplied API key, `terms_accepted = true`, and local config enablement
+before they will run.
+
+### Tor Public URL Check
+
+Tor support is intentionally narrow. CleanTrace only checks explicit `.onion` URLs you provide. It
+does not discover onion sites, crawl, follow links, submit forms, log in, or download files.
+
+You must run your own Tor SOCKS proxy; CleanTrace does not bundle Tor.
+
+```powershell
+cleantrace plugins enable tor_public_check
+cleantrace config set tor_public_check.socks_proxy socks5://127.0.0.1:9050
+cleantrace scan tor-url --profile default --url http://exampleonionaddress.onion --yes
+cleantrace scan tor-list --profile default --file onion_urls.txt --yes
+```
+
+If a URL or page appears to reference illegal marketplaces, credential dumps, stolen-data trading,
+CSAM, weapons trafficking, or drugs, CleanTrace stops processing and stores only a warning finding.
+
+### Manual Evidence Import
+
+Manual evidence import converts local material into redacted metadata findings. Use it for search
+exports, saved result pages, breach-provider emails, screenshots, data broker pages, or removal
+responses you lawfully obtained.
+
+```powershell
+cleantrace import evidence --profile default --file evidence.txt
+cleantrace import evidence --profile default --file evidence.html
+cleantrace import evidence --profile default --file evidence.json
+cleantrace import evidence --profile default --file screenshot.png
+```
+
+If imported text looks like it contains passwords, tokens, private keys, hashes, or leaked database
+rows, CleanTrace warns and stores only redacted metadata.
+
+### Broad Exposure Scan
+
+`scan exposure` runs the enabled modules that are safe to run without extra user input. It does not
+run disabled providers and does not run Tor unless URLs are explicitly supplied through the Tor
+commands.
+
+```powershell
+cleantrace scan exposure --profile default --depth quick
+cleantrace scan exposure --profile default --depth standard
+cleantrace scan exposure --profile default --depth deep --json
+```
 
 ## Findings and Reports
 
@@ -479,6 +599,33 @@ default_depth = "quick"
 redact_output = true
 respect_robots_txt = true
 
+[web_discovery]
+enabled = false
+default_provider = "searxng"
+respect_robots_txt = true
+max_results_quick = 10
+max_results_standard = 30
+max_results_deep = 75
+request_delay_seconds = 2
+cache_ttl_hours = 72
+
+[web_discovery.providers.searxng]
+enabled = false
+base_url = "http://localhost:8080"
+
+[breach_intel]
+enabled = false
+metadata_only = true
+store_raw_provider_responses = false
+redact_output = true
+
+[tor_public_check]
+enabled = false
+socks_proxy = "socks5://127.0.0.1:9050"
+follow_links = false
+max_urls_per_scan = 10
+store_page_content = false
+
 [ai]
 provider = "none"
 ollama_url = "http://localhost:11434"
@@ -507,6 +654,28 @@ Default scan depth used by future commands that read this setting.
 `scan.redact_output`
 
 Whether terminal output should redact sensitive values by default.
+
+`web_discovery.enabled`
+
+Module-level switch for Public Web Discovery. `cleantrace plugins enable web_discovery` updates this.
+
+`web_discovery.default_provider`
+
+Search provider to use when `--provider` is not passed. Supported values are `searxng`, `brave`,
+`bing`, `google_cse`, and `serpapi`.
+
+`breach_intel.enabled`
+
+Module-level switch for metadata-only Breach & Dark Web Intelligence.
+
+`breach_intel.store_raw_provider_responses`
+
+Must remain `false` for the intended privacy model. CleanTrace stores metadata findings, not raw
+provider payloads.
+
+`tor_public_check.socks_proxy`
+
+Local Tor SOCKS proxy URL. Tor must be installed and running separately.
 
 `ai.provider`
 
@@ -588,6 +757,10 @@ Current built-in plugins:
 - `username_discovery`
 - `hibp_email`
 - `github_connector`
+- `web_discovery`
+- `breach_intel`
+- `tor_public_check`
+- `manual_evidence`
 
 Plugin state is stored locally in `plugins.json`.
 
@@ -635,7 +808,9 @@ CleanTrace is usable, but still early.
 
 Known limits:
 
-- Phone, name, and domain scans are not implemented yet.
+- Public Web Discovery requires a configured search provider.
+- Tor support checks only explicit user-provided public onion URLs.
+- Breach intelligence is metadata-only and provider coverage depends on configured API keys.
 - Reports support Markdown and HTML only.
 - The Textual TUI is a dashboard, not a full replacement for the CLI.
 - Google Takeout parsing detects risk indicators, not every possible exposure.

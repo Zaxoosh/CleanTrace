@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
+
+import yaml
 
 from cleantrace.models import Finding, Profile
 
@@ -21,10 +24,16 @@ class Broker:
     name: str
     country: str
     opt_out_url: str
-    email: str | None
-    required_evidence: str
-    expected_response_time: str
-    notes: str
+    category: str = "data broker"
+    privacy_url: str | None = None
+    email: str | None = None
+    required_evidence: str = ""
+    expected_response_time: str = ""
+    supports_gdpr: bool = False
+    supports_uk_gdpr: bool = False
+    manual_only: bool = True
+    notes: str = ""
+    risk_notes: str = ""
 
 
 BROKERS = [
@@ -59,12 +68,46 @@ BROKERS = [
 
 
 def broker_names() -> list[str]:
-    return [broker.name for broker in BROKERS]
+    return [broker.name for broker in load_brokers()]
 
 
 def find_broker(name: str) -> Broker | None:
     needle = name.strip().lower()
-    return next((broker for broker in BROKERS if broker.name.lower() == needle), None)
+    return next((broker for broker in load_brokers() if broker.name.lower() == needle), None)
+
+
+def load_brokers() -> list[Broker]:
+    data_file = Path(__file__).parent / "data" / "data_brokers.yaml"
+    if not data_file.exists():
+        return BROKERS
+    try:
+        payload = yaml.safe_load(data_file.read_text(encoding="utf-8")) or []
+    except yaml.YAMLError:
+        return BROKERS
+    brokers: list[Broker] = []
+    for item in payload:
+        if not isinstance(item, dict) or not item.get("name"):
+            continue
+        brokers.append(
+            Broker(
+                name=str(item["name"]),
+                country=str(item.get("country") or ""),
+                category=str(item.get("category") or "data broker"),
+                opt_out_url=str(item.get("opt_out_url") or ""),
+                privacy_url=str(item.get("privacy_url") or "") or None,
+                email=str(item.get("contact_email") or "") or None,
+                required_evidence=", ".join(str(v) for v in item.get("required_info", []))
+                if isinstance(item.get("required_info"), list)
+                else str(item.get("required_info") or ""),
+                expected_response_time=f"{item.get('expected_response_days', '')} days".strip(),
+                supports_gdpr=bool(item.get("supports_gdpr", False)),
+                supports_uk_gdpr=bool(item.get("supports_uk_gdpr", False)),
+                manual_only=bool(item.get("manual_only", True)),
+                notes=str(item.get("notes") or ""),
+                risk_notes=str(item.get("risk_notes") or ""),
+            )
+        )
+    return brokers or BROKERS
 
 
 def render_finding_request(

@@ -7,11 +7,14 @@ from sqlmodel import Session, select
 
 from cleantrace.config import get_api_key
 from cleantrace.models import Finding, LinkedAccount, Profile, RemovalRequest, build_profile
+from cleantrace.phone import dump_phone_metadata, parse_phone_number, phone_search_variants
 from cleantrace.plugin_state import plugin_enabled
 from cleantrace.plugins.base import PluginFinding, ScanTarget
+from cleantrace.plugins.breach_intel import scan_breach_intel as run_breach_intel
 from cleantrace.plugins.github import GitHubConnectorPlugin
 from cleantrace.plugins.hibp import HIBPEmailPlugin
 from cleantrace.plugins.manager import plugins_for_input
+from cleantrace.plugins.web_discovery.service import discover_public_web
 from cleantrace.security import CryptoBox, stable_hash
 
 
@@ -143,6 +146,144 @@ async def scan_github_linked(
             stored.append(upsert_finding(session, profile, plugin_finding))
         account.last_scanned_at = datetime.now(UTC)
         session.add(account)
+    session.commit()
+    return stored
+
+
+def add_profile_phone(
+    session: Session,
+    crypto: CryptoBox,
+    *,
+    profile: Profile,
+    phone: str,
+    country: str | None = None,
+) -> Profile:
+    metadata = profile.phone_metadata(crypto)
+    parsed = parse_phone_number(phone, country)
+    by_e164 = {item.e164: item for item in metadata}
+    by_e164[parsed.e164] = parsed
+    ordered = list(by_e164.values())
+    profile.phones_enc = crypto.encrypt_text(dump_phone_metadata(ordered)) or ""
+    profile.phone_hashes_json = json.dumps([stable_hash(item.e164) for item in ordered])
+    session.add(profile)
+    session.commit()
+    session.refresh(profile)
+    return profile
+
+
+def remove_profile_phone(
+    session: Session,
+    crypto: CryptoBox,
+    *,
+    profile: Profile,
+    value: str,
+) -> int:
+    metadata = profile.phone_metadata(crypto)
+    normalised = None
+    try:
+        normalised = parse_phone_number(value).e164
+    except ValueError:
+        normalised = value.strip()
+    kept = [
+        item
+        for item in metadata
+        if item.e164 != normalised and item.national_format != normalised
+    ]
+    removed = len(metadata) - len(kept)
+    if removed:
+        profile.phones_enc = crypto.encrypt_text(dump_phone_metadata(kept)) or ""
+        profile.phone_hashes_json = json.dumps([stable_hash(item.e164) for item in kept])
+        session.add(profile)
+        session.commit()
+        session.refresh(profile)
+    return removed
+
+
+def scan_phone_profile(
+    session: Session,
+    crypto: CryptoBox,
+    *,
+    profile: Profile,
+    value: str | None = None,
+    country: str | None = None,
+) -> list[Finding]:
+    if profile.id is None:
+        raise ValueError("Profile must be persisted before scanning.")
+    numbers = [parse_phone_number(value, country)] if value else profile.phone_metadata(crypto)
+    stored: list[Finding] = []
+    for number in numbers:
+        variants = phone_search_variants(number)
+        finding = PluginFinding(
+            source_plugin="phone_exposure",
+            input_type="phone",
+            input_value_hash=stable_hash(number.e164),
+            title="Phone number normalised for exposure review",
+            description=(
+                "CleanTrace validated the phone number locally and generated public-web "
+                "search variants. It did not send SMS, place calls, or perform active "
+                "phone verification."
+            ),
+            url=None,
+            evidence={
+                "e164_hash": stable_hash(number.e164),
+                "national_format": number.national_format,
+                "international_format": number.international_format,
+                "region_code": number.region_code,
+                "country_calling_code": number.country_calling_code,
+                "is_valid": number.is_valid,
+                "search_variants": variants,
+            },
+            confidence=100 if number.is_valid else 45,
+            severity="low" if number.is_valid else "info",
+            remediation=(
+                "Use public web discovery for these variants and remove unnecessary phone exposure."
+            ),
+            tags=["phone", "phone-exposure", "public-web-lead"],
+        )
+        stored.append(upsert_finding(session, profile, finding))
+    session.commit()
+    return stored
+
+
+async def scan_web_discovery(
+    session: Session,
+    crypto: CryptoBox,
+    *,
+    profile: Profile,
+    depth: str = "quick",
+    query_set: str = "identity",
+    provider_name: str | None = None,
+) -> list[Finding]:
+    if profile.id is None:
+        raise ValueError("Profile must be persisted before scanning.")
+    if not plugin_enabled("web_discovery"):
+        return []
+    findings = await discover_public_web(
+        profile,
+        crypto,
+        depth=depth,
+        query_set=query_set,
+        provider_name=provider_name,
+    )
+    stored = [upsert_finding(session, profile, finding) for finding in findings]
+    session.commit()
+    return stored
+
+
+async def scan_intel(
+    session: Session,
+    crypto: CryptoBox,
+    *,
+    profile: Profile,
+    provider: str | None = None,
+    depth: str = "quick",
+) -> list[Finding]:
+    if profile.id is None:
+        raise ValueError("Profile must be persisted before scanning.")
+    if not plugin_enabled("breach_intel"):
+        return []
+    findings = await run_breach_intel(profile, crypto, provider=provider, depth=depth)
+    stored = [upsert_finding(session, profile, finding) for finding in findings]
     session.commit()
     return stored
 

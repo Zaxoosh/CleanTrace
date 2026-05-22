@@ -22,13 +22,16 @@ from cleantrace.ai import (
     removal_email_prompt,
     summarise_prompt,
 )
-from cleantrace.config import get_api_key, load_config, write_default_config
+from cleantrace.config import config_set, get_api_key, load_config, write_default_config
 from cleantrace.db import get_engine, get_profile_by_slug, init_db, list_findings
+from cleantrace.evidence import import_evidence_file
 from cleantrace.models import Finding, Profile, RemovalRequest
 from cleantrace.paths import config_path, database_path, key_path
+from cleantrace.phone import parse_phone_number
 from cleantrace.plugin_state import load_plugin_states, set_plugin_enabled
 from cleantrace.plugins.manager import built_in_plugin_metadata
 from cleantrace.plugins.pwned_passwords import check_pwned_password
+from cleantrace.plugins.tor_public_check import check_tor_urls
 from cleantrace.removal import (
     REMOVAL_STATUSES,
     broker_names,
@@ -49,15 +52,20 @@ from cleantrace.reports import write_report
 from cleantrace.scoring import exposure_score, top_actions
 from cleantrace.security import CryptoBox, redact_text
 from cleantrace.services import (
+    add_profile_phone,
     create_profile,
     create_removal_request,
     get_finding,
     get_removal_request,
     link_account,
     list_removal_requests,
+    remove_profile_phone,
     scan_email,
     scan_github_linked,
+    scan_intel,
+    scan_phone_profile,
     scan_username,
+    scan_web_discovery,
     update_removal_status,
     upsert_finding,
 )
@@ -74,6 +82,10 @@ app = typer.Typer(
     invoke_without_command=True,
 )
 profile_app = typer.Typer(help="Manage explicit consent profiles.", no_args_is_help=True)
+profile_phone_app = typer.Typer(
+    help="Manage encrypted profile phone numbers.",
+    no_args_is_help=True,
+)
 scan_app = typer.Typer(help="Run consent-based local-first scans.", no_args_is_help=True)
 plugins_app = typer.Typer(help="Inspect and configure scanner plugins.", no_args_is_help=True)
 removal_app = typer.Typer(help="Generate and track removal actions.", no_args_is_help=True)
@@ -86,6 +98,7 @@ ai_app = typer.Typer(
 )
 
 app.add_typer(profile_app, name="profile")
+profile_app.add_typer(profile_phone_app, name="phone")
 app.add_typer(scan_app, name="scan")
 app.add_typer(plugins_app, name="plugins")
 app.add_typer(removal_app, name="removal")
@@ -304,6 +317,75 @@ def profile_show(
         )
 
 
+@profile_phone_app.command("add")
+def profile_phone_add(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    phone: Annotated[str | None, typer.Argument(help="Phone number to add.")] = None,
+    country: Annotated[
+        str,
+        typer.Option("--country", help="Country name, ISO code, or dialling code."),
+    ] = "GB",
+) -> None:
+    """Add and normalise an encrypted phone number for a consent profile."""
+    init_db(_engine())
+    phone = phone or Prompt.ask("Phone number")
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        try:
+            parsed = parse_phone_number(phone, country)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        add_profile_phone(session, crypto, profile=profile, phone=phone, country=country)
+    console.print(
+        "[green]Added phone[/green] "
+        f"{redact_text(parsed.international_format)} "
+        f"({parsed.region_code}, valid={parsed.is_valid})"
+    )
+
+
+@profile_phone_app.command("list")
+def profile_phone_list(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    show_sensitive: Annotated[bool, typer.Option("--show-sensitive")] = False,
+) -> None:
+    """List encrypted profile phone numbers with country metadata."""
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        phones = profile.phone_metadata(crypto)
+    table = Table(title=f"Phone Numbers: {profile_slug}", box=box.SIMPLE_HEAVY)
+    table.add_column("Phone")
+    table.add_column("National")
+    table.add_column("Region")
+    table.add_column("Calling code")
+    table.add_column("Valid")
+    for phone in phones:
+        table.add_row(
+            phone.e164 if show_sensitive else redact_text(phone.e164),
+            phone.national_format if show_sensitive else redact_text(phone.national_format),
+            phone.region_code,
+            str(phone.country_calling_code),
+            "yes" if phone.is_valid else "no",
+        )
+    console.print(table)
+
+
+@profile_phone_app.command("remove")
+def profile_phone_remove(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    phone: Annotated[str, typer.Argument(help="Phone number or E.164 value to remove.")] = "",
+) -> None:
+    """Remove a phone number from an encrypted consent profile."""
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        removed = remove_profile_phone(session, crypto, profile=profile, value=phone)
+    console.print(f"[green]Removed {removed} phone number(s).[/green]")
+
+
 @scan_app.command("username")
 def scan_username_command(
     value: Annotated[
@@ -370,7 +452,7 @@ def scan_all_command(
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
-    """Run username, HIBP email, and linked-account checks for a profile."""
+    """Run enabled consent-profile exposure checks."""
     if depth not in {"quick", "standard", "deep"}:
         raise typer.BadParameter("depth must be quick, standard, or deep.")
     init_db(_engine())
@@ -403,6 +485,23 @@ def scan_all_command(
                             )
                         )
                     )
+        new_findings.extend(scan_phone_profile(session, crypto, profile=profile))
+        with console.status("Running enabled public web discovery...", spinner="dots"):
+            new_findings.extend(
+                asyncio.run(
+                    scan_web_discovery(
+                        session,
+                        crypto,
+                        profile=profile,
+                        depth=depth,
+                        query_set="all",
+                    )
+                )
+            )
+        with console.status("Checking enabled breach intelligence providers...", spinner="dots"):
+            new_findings.extend(
+                asyncio.run(scan_intel(session, crypto, profile=profile, depth=depth))
+            )
         with console.status("Checking linked GitHub accounts...", spinner="dots"):
             new_findings.extend(
                 asyncio.run(scan_github_linked(session, crypto, profile=profile))
@@ -550,12 +649,238 @@ def scan_github_command(
 
 
 @scan_app.command("phone")
-def scan_phone_command() -> None:
-    """Milestone 2 placeholder for safe phone exposure checks."""
-    console.print(
-        "[yellow]Phone scanning lands in Milestone 2. "
-        "CleanTrace will not send SMS or verify numbers.[/yellow]"
+def scan_phone_command(
+    value: Annotated[
+        str | None,
+        typer.Argument(help="Phone number to validate. Omit to use profile phones."),
+    ] = None,
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    country: Annotated[str, typer.Option("--country")] = "GB",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Validate phone metadata and generate safe public-web search variants."""
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        try:
+            new_findings = scan_phone_profile(
+                session,
+                crypto,
+                profile=profile,
+                value=value,
+                country=country,
+            )
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        findings = list_findings(session, profile)
+    if json_output:
+        console.print_json(
+            json.dumps(
+                {
+                    "profile": profile_slug,
+                    "new_findings": len(new_findings),
+                    "findings": [finding.model_dump(mode="json") for finding in new_findings],
+                },
+                default=str,
+            )
+        )
+        return
+    console.print(findings_table(new_findings))
+    console.print(actions_panel(findings))
+
+
+@scan_app.command("web")
+def scan_web_command(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    depth: Annotated[str, typer.Option("--depth", help="quick, standard, or deep.")] = "quick",
+    query_set: Annotated[
+        str,
+        typer.Option("--query-set", help="identity, phone, username, email, or all."),
+    ] = "identity",
+    provider: Annotated[str | None, typer.Option("--provider")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Run public web discovery through a configured search provider."""
+    if depth not in {"quick", "standard", "deep"}:
+        raise typer.BadParameter("depth must be quick, standard, or deep.")
+    if query_set not in {"identity", "phone", "username", "email", "all"}:
+        raise typer.BadParameter("query-set must be identity, phone, username, email, or all.")
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        with console.status("Running provider-backed public web discovery...", spinner="dots"):
+            new_findings = asyncio.run(
+                scan_web_discovery(
+                    session,
+                    crypto,
+                    profile=profile,
+                    depth=depth,
+                    query_set=query_set,
+                    provider_name=provider,
+                )
+            )
+        findings = list_findings(session, profile)
+    if json_output:
+        console.print_json(
+            json.dumps(
+                {
+                    "profile": profile_slug,
+                    "new_findings": len(new_findings),
+                    "exposure_score": exposure_score(findings, profile),
+                    "findings": [finding.model_dump(mode="json") for finding in new_findings],
+                },
+                default=str,
+            )
+        )
+        return
+    console.print(summary_panel(profile, findings))
+    console.print(findings_table(new_findings if new_findings else findings))
+    console.print(actions_panel(findings))
+
+
+@scan_app.command("intel")
+def scan_intel_command(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    provider: Annotated[
+        str | None,
+        typer.Option("--provider", help="hibp, leakcheck, dehashed, or intelx."),
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Run metadata-only Breach & Dark Web Intelligence checks."""
+    if provider and provider not in {"hibp", "leakcheck", "dehashed", "intelx"}:
+        raise typer.BadParameter("provider must be hibp, leakcheck, dehashed, or intelx.")
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        with console.status("Checking breach intelligence metadata providers...", spinner="dots"):
+            new_findings = asyncio.run(
+                scan_intel(session, crypto, profile=profile, provider=provider)
+            )
+        findings = list_findings(session, profile)
+    if json_output:
+        console.print_json(
+            json.dumps(
+                {
+                    "profile": profile_slug,
+                    "new_findings": len(new_findings),
+                    "findings": [finding.model_dump(mode="json") for finding in new_findings],
+                },
+                default=str,
+            )
+        )
+        return
+    console.print(summary_panel(profile, findings))
+    console.print(findings_table(new_findings if new_findings else findings))
+    console.print(actions_panel(findings))
+
+
+@scan_app.command("tor-url")
+def scan_tor_url_command(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    url: Annotated[str, typer.Option("--url", help="Explicit user-provided onion URL.")] = "",
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Confirm safe-use warning.")] = False,
+) -> None:
+    """Check one explicit public onion URL without crawling."""
+    if not url:
+        raise typer.BadParameter("--url is required.")
+    prompt = (
+        "I confirm these URLs are being checked for my own safety and I will not use "
+        "this tool to access illegal content."
     )
+    if not yes and not Confirm.ask(prompt, default=False):
+        raise typer.Exit(1)
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        plugin_findings = asyncio.run(check_tor_urls(profile, crypto, [url]))
+        new_findings = [upsert_finding(session, profile, finding) for finding in plugin_findings]
+        session.commit()
+        findings = list_findings(session, profile)
+    console.print(findings_table(new_findings))
+    console.print(actions_panel(findings))
+
+
+@scan_app.command("tor-list")
+def scan_tor_list_command(
+    file: Annotated[Path, typer.Option("--file", help="Text file of explicit onion URLs.")],
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Confirm safe-use warning.")] = False,
+) -> None:
+    """Check explicit public onion URLs from a local file without crawling."""
+    prompt = (
+        "I confirm these URLs are being checked for my own safety and I will not use "
+        "this tool to access illegal content."
+    )
+    if not yes and not Confirm.ask(prompt, default=False):
+        raise typer.Exit(1)
+    urls = [line.strip() for line in file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        plugin_findings = asyncio.run(check_tor_urls(profile, crypto, urls))
+        new_findings = [upsert_finding(session, profile, finding) for finding in plugin_findings]
+        session.commit()
+        findings = list_findings(session, profile)
+    console.print(findings_table(new_findings))
+    console.print(actions_panel(findings))
+
+
+@scan_app.command("exposure")
+def scan_exposure_command(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    depth: Annotated[str, typer.Option("--depth", help="quick, standard, or deep.")] = "quick",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Run enabled modules for a broad, consent-profile exposure assessment."""
+    if depth not in {"quick", "standard", "deep"}:
+        raise typer.BadParameter("depth must be quick, standard, or deep.")
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        new_findings: list[Finding] = []
+        for username in profile.usernames(crypto):
+            new_findings.extend(
+                asyncio.run(scan_username(session, profile=profile, username=username, depth=depth))
+            )
+        new_findings.extend(scan_phone_profile(session, crypto, profile=profile))
+        new_findings.extend(
+            asyncio.run(
+                scan_web_discovery(
+                    session,
+                    crypto,
+                    profile=profile,
+                    depth=depth,
+                    query_set="all",
+                )
+            )
+        )
+        new_findings.extend(asyncio.run(scan_intel(session, crypto, profile=profile, depth=depth)))
+        new_findings.extend(asyncio.run(scan_github_linked(session, crypto, profile=profile)))
+        findings = list_findings(session, profile)
+    if json_output:
+        console.print_json(
+            json.dumps(
+                {
+                    "profile": profile_slug,
+                    "new_findings": len(new_findings),
+                    "overall_exposure_score": exposure_score(findings, profile),
+                    "top_actions": top_actions(findings),
+                    "findings": [finding.model_dump(mode="json") for finding in findings],
+                },
+                default=str,
+            )
+        )
+        return
+    console.print(summary_panel(profile, findings))
+    console.print(findings_table(new_findings if new_findings else findings))
+    console.print(actions_panel(findings))
 
 
 @scan_app.command("password")
@@ -584,17 +909,35 @@ def scan_password_command(
 
 
 @scan_app.command("name")
-def scan_name_command() -> None:
-    """Milestone 2 placeholder for search-API-backed public web checks."""
-    console.print(
-        "[yellow]Name/public web scanning lands in Milestone 2 via configured search APIs.[/yellow]"
+def scan_name_command(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    depth: Annotated[str, typer.Option("--depth", help="quick, standard, or deep.")] = "quick",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Run identity-query public web discovery for profile names."""
+    scan_web_command(
+        profile_slug=profile_slug,
+        depth=depth,
+        query_set="identity",
+        provider=None,
+        json_output=json_output,
     )
 
 
 @scan_app.command("domain")
-def scan_domain_command() -> None:
-    """Milestone 2 placeholder for domain exposure checks."""
-    console.print("[yellow]Domain scanning lands in Milestone 2.[/yellow]")
+def scan_domain_command(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    depth: Annotated[str, typer.Option("--depth", help="quick, standard, or deep.")] = "quick",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Run public web discovery for known profile domains."""
+    scan_web_command(
+        profile_slug=profile_slug,
+        depth=depth,
+        query_set="identity",
+        provider=None,
+        json_output=json_output,
+    )
 
 
 @app.command("findings")
@@ -642,8 +985,23 @@ def report_command(
 
 
 @app.command("config")
-def config_command() -> None:
-    """Show local configuration paths."""
+def config_command(
+    action: Annotated[str | None, typer.Argument(help="Use 'set' to update a key.")] = None,
+    key: Annotated[
+        str | None,
+        typer.Argument(help="Config key path, e.g. web_discovery.enabled."),
+    ] = None,
+    value: Annotated[str | None, typer.Argument(help="Config value.")] = None,
+) -> None:
+    """Show config paths or set a simple local configuration value."""
+    if action == "set":
+        if not key or value is None:
+            raise typer.BadParameter("Usage: cleantrace config set <key> <value>")
+        path = config_set(key, value)
+        console.print(f"[green]Updated config[/green] {key} in {path}")
+        return
+    if action is not None:
+        raise typer.BadParameter("Only 'set' is supported, or run cleantrace config.")
     cfg = load_config()
     console.print_json(
         json.dumps(
@@ -689,6 +1047,8 @@ def plugins_enable(name: Annotated[str, typer.Argument()]) -> None:
         set_plugin_enabled(name, True)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+    if name in {"web_discovery", "breach_intel", "tor_public_check"}:
+        config_set(f"{name}.enabled", "true")
     console.print(f"[green]Enabled plugin[/green] {name}")
 
 
@@ -699,6 +1059,8 @@ def plugins_disable(name: Annotated[str, typer.Argument()]) -> None:
         set_plugin_enabled(name, False)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+    if name in {"web_discovery", "breach_intel", "tor_public_check"}:
+        config_set(f"{name}.enabled", "false")
     console.print(f"[green]Disabled plugin[/green] {name}")
 
 
@@ -923,6 +1285,48 @@ def import_google_takeout(
         console.print(summary_panel(profile, findings))
         console.print(findings_table(stored if stored else findings))
         console.print(actions_panel(findings))
+
+
+@import_app.command("evidence")
+def import_evidence(
+    path: Annotated[Path, typer.Option("--file", help="Evidence file to import locally.")],
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    status: Annotated[
+        str,
+        typer.Option(
+            "--status",
+            help="confirmed, false positive, needs review, removal requested, or removed.",
+        ),
+    ] = "needs review",
+    attach_finding: Annotated[str | None, typer.Option("--attach-finding")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Import user-provided evidence as redacted local metadata only."""
+    allowed = {"confirmed", "false positive", "needs review", "removal requested", "removed"}
+    if status not in allowed:
+        raise typer.BadParameter(f"status must be one of: {', '.join(sorted(allowed))}")
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        plugin_finding = import_evidence_file(
+            profile,
+            crypto,
+            path,
+            status=status,
+            attach_finding=attach_finding,
+        )
+        stored = upsert_finding(session, profile, plugin_finding)
+        session.commit()
+    if json_output:
+        console.print_json(json.dumps(stored.model_dump(mode="json"), default=str))
+        return
+    if stored.evidence.get("sensitive_values_detected"):
+        console.print(
+            "[yellow]Sensitive-looking values were detected and redacted. "
+            "CleanTrace did not store raw secret values.[/yellow]"
+        )
+    console.print(f"[green]Imported evidence metadata[/green] {stored.id[:10]} from {path.name}")
 
 
 @app.command("tui")

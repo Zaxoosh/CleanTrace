@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from sqlmodel import Field, SQLModel
 
+from cleantrace.phone import load_phone_metadata
 from cleantrace.security import CryptoBox, stable_hash
 
 
@@ -41,7 +42,8 @@ class Profile(SQLModel, table=True):
         display_names = crypto.decrypt_json(self.display_names_enc, [])
         usernames = crypto.decrypt_json(self.usernames_enc, [])
         emails = crypto.decrypt_json(self.emails_enc, [])
-        phones = crypto.decrypt_json(self.phones_enc, [])
+        phones = load_phone_metadata(crypto, self.phones_enc)
+        location = crypto.decrypt_text(self.location_enc)
         domains = crypto.decrypt_json(self.domains_enc, [])
         return {
             "id": self.id,
@@ -50,7 +52,8 @@ class Profile(SQLModel, table=True):
             "display_names": [redact(v, show_sensitive) for v in display_names],
             "usernames": [redact(v, show_sensitive) for v in usernames],
             "emails": [redact(v, show_sensitive) for v in emails],
-            "phones": [redact(v, show_sensitive) for v in phones],
+            "phones": [redact(phone.e164, show_sensitive) for phone in phones],
+            "location": redact(location, show_sensitive),
             "domains": [redact(v, show_sensitive) for v in domains],
             "risk_sensitivity": self.risk_sensitivity,
             "consent": self.consent,
@@ -62,6 +65,12 @@ class Profile(SQLModel, table=True):
 
     def emails(self, crypto: CryptoBox) -> list[str]:
         return list(crypto.decrypt_json(self.emails_enc, []))
+
+    def phones(self, crypto: CryptoBox) -> list[str]:
+        return [phone.e164 for phone in load_phone_metadata(crypto, self.phones_enc)]
+
+    def phone_metadata(self, crypto: CryptoBox) -> list[Any]:
+        return load_phone_metadata(crypto, self.phones_enc)
 
     def domains(self, crypto: CryptoBox) -> list[str]:
         return list(crypto.decrypt_json(self.domains_enc, []))
@@ -86,23 +95,31 @@ def build_profile(
     risk_sensitivity: str = "normal",
     consent: bool = False,
 ) -> Profile:
+    from cleantrace.phone import dump_phone_metadata, parse_phone_number
+
     usernames = usernames or []
     emails = emails or []
     phones = phones or []
+    phone_metadata = []
+    for phone in phones:
+        try:
+            phone_metadata.append(parse_phone_number(phone))
+        except Exception:
+            continue
     return Profile(
         slug=slug,
         legal_name_enc=crypto.encrypt_text(legal_name),
         display_names_enc=crypto.encrypt_json(display_names or []),
         usernames_enc=crypto.encrypt_json(usernames),
         emails_enc=crypto.encrypt_json(emails),
-        phones_enc=crypto.encrypt_json(phones),
+        phones_enc=crypto.encrypt_text(dump_phone_metadata(phone_metadata)) or "",
         location_enc=crypto.encrypt_text(location),
         domains_enc=crypto.encrypt_json(domains or []),
         social_links_enc=crypto.encrypt_json(social_links or []),
         role_notes_enc=crypto.encrypt_text(role_notes),
         username_hashes_json=json.dumps([stable_hash(v) for v in usernames]),
         email_hashes_json=json.dumps([stable_hash(v) for v in emails]),
-        phone_hashes_json=json.dumps([stable_hash(v) for v in phones]),
+        phone_hashes_json=json.dumps([stable_hash(v.e164) for v in phone_metadata]),
         risk_sensitivity=risk_sensitivity,
         consent=consent,
         consent_timestamp=utc_now() if consent else None,

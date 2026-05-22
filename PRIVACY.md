@@ -5,6 +5,8 @@ CleanTrace is local-first by default.
 ## Data Storage
 
 - Raw profile identifiers are encrypted locally.
+- Phone numbers are encrypted locally. CleanTrace stores normalised phone metadata only for local
+  matching and reporting.
 - Findings store hashed scanned identifiers and public evidence metadata.
 - Linked account tokens are encrypted locally and can be removed with `cleantrace unlink`.
 - No telemetry is sent.
@@ -23,6 +25,56 @@ HIBP checks use the official Have I Been Pwned API only when an API key is confi
 
 Google Takeout imports are parsed from a local ZIP archive only. CleanTrace stores findings derived from risk indicators, not the full Takeout archive.
 
+Public Web Discovery sends generated search queries to the search provider you explicitly enable,
+such as SearXNG, Brave, Bing, Google Custom Search, or SerpAPI. Disable it with:
+
+```powershell
+cleantrace plugins disable web_discovery
+```
+
+Breach & Dark Web Intelligence sends identifiers only to providers you explicitly enable and
+configure. CleanTrace stores breach/source name, breach date where available, data classes, provider,
+severity, and remediation. It does not store leaked records, passwords, password hashes, tokens,
+private keys, or full provider responses.
+
+Disable it with:
+
+```powershell
+cleantrace plugins disable breach_intel
+```
+
+Tor public URL checks use your local SOCKS proxy and only inspect explicit `.onion` URLs you provide.
+They do not crawl, follow links, download files, log in, or store raw page content by default.
+
+Manual evidence import is local-only. Text is redacted before being stored as metadata. Screenshots
+are recorded as file metadata only; image analysis is not performed.
+
+## Never Stored
+
+CleanTrace should not store:
+
+- plaintext passwords
+- password hashes from leaked datasets
+- session tokens
+- private keys
+- browser cookies
+- raw leaked database rows
+- full provider raw responses
+- raw Tor page content by default
+
+## Wiping Local Data
+
+Delete the SQLite database:
+
+```powershell
+cleantrace wipe
+```
+
+For a full local reset, also remove the config, key, plugin state, and any reports/evidence files you
+created manually.
+
 ## AI
 
-AI is disabled by default. Milestone 3 supports local Ollama only when `ai.provider = "ollama"` is configured. CleanTrace redacts sensitive values before prompts. OpenAI-compatible/cloud AI is not implemented in Milestone 3.
+AI is disabled by default. CleanTrace supports local Ollama when `ai.provider = "ollama"` is
+configured. CleanTrace redacts sensitive values before prompts. Prefer local AI; do not enable any
+cloud-compatible provider unless you understand what identifiers may leave the machine.
