@@ -21,6 +21,8 @@ Username scanning makes direct HTTP requests to public profile URLs listed in th
 
 HIBP checks use the official Have I Been Pwned API only when an API key is configured. GitHub checks use official GitHub APIs for accounts you explicitly link. CleanTrace does not upload repository contents; public repository files sampled for secret-pattern checks are fetched from GitHub and scanned locally.
 
+Google Takeout imports are parsed from a local ZIP archive only. CleanTrace stores findings derived from risk indicators, not the full Takeout archive.
+
 ## AI
 
-AI is disabled by default. Future AI features will prefer local Ollama. Cloud AI providers will require explicit opt-in and redaction by default.
+AI is disabled by default. Milestone 3 supports local Ollama only when `ai.provider = "ollama"` is configured. CleanTrace redacts sensitive values before prompts. OpenAI-compatible/cloud AI is not implemented in Milestone 3.

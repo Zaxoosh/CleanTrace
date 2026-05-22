@@ -18,6 +18,8 @@ Open a private security advisory or contact the maintainers without posting expl
 
 CleanTrace encrypts raw profile identifiers and linked account tokens locally, but it cannot protect data if the local machine, user account, Python environment, or installed plugins are compromised. The local database and encryption key should both be treated as sensitive.
 
+Google Takeout archives can contain highly sensitive account, location, photo, and sharing data. CleanTrace parses them locally, but users should keep the original archive private and delete it when no longer needed.
+
 ## Non-Goals
 
 CleanTrace will not add features for credential attacks, CAPTCHA bypass, password reset abuse, hidden scraping, browser cookie theft, leaked database scraping, or non-consensual target discovery.

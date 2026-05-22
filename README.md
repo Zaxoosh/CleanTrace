@@ -2,7 +2,7 @@
 
 CleanTrace helps you find public exposure, understand risk, generate removal requests, and track cleanup.
 
-It is an open-source, local-first CLI privacy exposure and OSINT self-assessment tool. The current milestone supports explicit consent profiles, encrypted local storage, username discovery, official HIBP email checks when configured, a GitHub connector, removal request drafts, stored findings, and Markdown/HTML reports.
+It is an open-source, local-first CLI privacy exposure and OSINT self-assessment tool. The current milestone supports explicit consent profiles, encrypted local storage, username discovery, official HIBP email checks when configured, a GitHub connector, local Google Takeout import, a Textual dashboard, local Ollama assistant commands, removal request drafts, stored findings, and Markdown/HTML reports.
 
 ## What CleanTrace Does
 
@@ -13,7 +13,10 @@ It is an open-source, local-first CLI privacy exposure and OSINT self-assessment
 - Checks a password against HIBP Pwned Passwords using k-anonymity without storing it.
 - Links your own GitHub account using official GitHub APIs and encrypted local token storage.
 - Flags public GitHub profile exposure, linked sites, sensitive config filenames, and safe regex-based secret leads in public repositories.
+- Imports Google Takeout ZIP archives locally and flags location history, photo metadata, profile metadata, and shared-link indicators.
 - Generates local removal request drafts and tracks cleanup status.
+- Opens a local Textual dashboard with profiles, findings, and removal status.
+- Uses local Ollama for optional summaries/actions only when explicitly configured.
 - Records findings with source, confidence, timestamp, severity, evidence, and remediation advice.
 - Produces terminal summaries and Markdown/HTML reports.
 - Ends scans with the top five actions to reduce exposure.
@@ -46,6 +49,8 @@ cleantrace link github
 cleantrace scan github --profile default
 cleantrace removal generate --finding FINDING_ID
 cleantrace removal track --request REQUEST_ID --status sent
+cleantrace import google-takeout ./takeout.zip --profile default
+cleantrace tui
 cleantrace report --profile default --format markdown --output cleantrace-report.md
 cleantrace report --profile default --format html --output cleantrace-report.html
 ```
@@ -98,6 +103,45 @@ cleantrace link github --profile default --username yourhandle --no-from-gh
 ```
 
 Private repository scanning is off by default and requires explicit `--private-scan` opt-in.
+
+## Google Takeout Import
+
+Takeout import is local-only:
+
+```bash
+cleantrace import google-takeout ./takeout.zip --profile default
+```
+
+CleanTrace does not upload the archive. It looks for risk indicators such as location history files, Google Photos metadata with geolocation-like fields, profile metadata, and Drive/shared-link metadata.
+
+## Textual TUI
+
+```bash
+cleantrace tui
+```
+
+The dashboard shows profiles, findings, exposure score, and removal request status. Press `r` to refresh and `q` to quit.
+
+## Local AI
+
+AI is disabled by default. To use local Ollama, set:
+
+```toml
+[ai]
+provider = "ollama"
+ollama_url = "http://localhost:11434"
+ollama_model = "llama3.1"
+```
+
+Then run:
+
+```bash
+cleantrace ai summarise --profile default
+cleantrace ai actions --profile default
+cleantrace ai removal-email --profile default --finding FINDING_ID
+```
+
+CleanTrace redacts sensitive values before building prompts. OpenAI-compatible/cloud AI is not implemented in Milestone 3.
 
 ## Example Output
 
@@ -188,12 +232,18 @@ Future Milestone 2.x:
 
 - safer phone/domain/name modules via configured APIs
 
-Milestone 3:
+Completed Milestone 3:
 
 - Textual TUI
 - Google Takeout import
-- broader plugin marketplace
+- local plugin enable/disable state
 - local Ollama summariser
+
+Future:
+
+- broader third-party plugin marketplace
+- safer phone/domain/name modules via configured APIs
+- richer report exports and screenshots
 
 ## Legal and Ethical Disclaimer
 

@@ -14,10 +14,19 @@ from sqlalchemy import Engine
 from sqlmodel import Session, select
 
 from cleantrace import __version__
+from cleantrace.ai import (
+    AIUnavailableError,
+    actions_prompt,
+    build_findings_context,
+    ollama_generate,
+    removal_email_prompt,
+    summarise_prompt,
+)
 from cleantrace.config import get_api_key, load_config, write_default_config
 from cleantrace.db import get_engine, get_profile_by_slug, init_db, list_findings
 from cleantrace.models import Finding, Profile, RemovalRequest
 from cleantrace.paths import config_path, database_path, key_path
+from cleantrace.plugin_state import load_plugin_states, set_plugin_enabled
 from cleantrace.plugins.manager import built_in_plugin_metadata
 from cleantrace.plugins.pwned_passwords import check_pwned_password
 from cleantrace.removal import (
@@ -50,10 +59,13 @@ from cleantrace.services import (
     scan_github_linked,
     scan_username,
     update_removal_status,
+    upsert_finding,
 )
 from cleantrace.services import (
     unlink_provider as unlink_provider_service,
 )
+from cleantrace.takeout import analyse_google_takeout
+from cleantrace.tui import run_tui
 
 app = typer.Typer(
     name="cleantrace",
@@ -68,6 +80,10 @@ removal_app = typer.Typer(help="Generate and track removal actions.", no_args_is
 link_app = typer.Typer(help="Link optional self-owned account connectors.", no_args_is_help=True)
 unlink_app = typer.Typer(help="Disconnect linked providers.", no_args_is_help=True)
 import_app = typer.Typer(help="Import local account exports.", no_args_is_help=True)
+ai_app = typer.Typer(
+    help="Local AI assistant commands. Disabled unless explicitly configured.",
+    no_args_is_help=True,
+)
 
 app.add_typer(profile_app, name="profile")
 app.add_typer(scan_app, name="scan")
@@ -76,6 +92,7 @@ app.add_typer(removal_app, name="removal")
 app.add_typer(link_app, name="link")
 app.add_typer(unlink_app, name="unlink")
 app.add_typer(import_app, name="import")
+app.add_typer(ai_app, name="ai")
 
 
 def _engine() -> Engine:
@@ -635,6 +652,8 @@ def config_command() -> None:
                 "database": str(cfg.database),
                 "user_sites_dir": str(cfg.user_sites_dir),
                 "ai_provider": cfg.ai_provider,
+                "ollama_url": cfg.ollama_url,
+                "ollama_model": cfg.ollama_model,
             }
         )
     )
@@ -643,12 +662,13 @@ def config_command() -> None:
 @plugins_app.command("list")
 def plugins_list() -> None:
     """List built-in plugins and their risk labels."""
+    states = load_plugin_states()
     table = Table(title="Plugins", box=box.SIMPLE_HEAVY)
     table.add_column("Name", style="bold")
     table.add_column("Inputs")
     table.add_column("Risk")
     table.add_column("API key")
-    table.add_column("Default")
+    table.add_column("Enabled")
     table.add_column("Description")
     for meta in built_in_plugin_metadata():
         table.add_row(
@@ -656,7 +676,7 @@ def plugins_list() -> None:
             ", ".join(meta.input_types),
             meta.risk_level,
             "yes" if meta.needs_api_key else "no",
-            "yes" if meta.enabled_by_default else "no",
+            "yes" if states.get(meta.name, meta.enabled_by_default) else "no",
             meta.description,
         )
     console.print(table)
@@ -664,14 +684,22 @@ def plugins_list() -> None:
 
 @plugins_app.command("enable")
 def plugins_enable(name: Annotated[str, typer.Argument()]) -> None:
-    """Milestone 2 placeholder for user plugin configuration."""
-    console.print(f"[yellow]Plugin enable/disable config lands in Milestone 2: {name}[/yellow]")
+    """Enable a built-in plugin in the local plugin state file."""
+    try:
+        set_plugin_enabled(name, True)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print(f"[green]Enabled plugin[/green] {name}")
 
 
 @plugins_app.command("disable")
 def plugins_disable(name: Annotated[str, typer.Argument()]) -> None:
-    """Milestone 2 placeholder for user plugin configuration."""
-    console.print(f"[yellow]Plugin enable/disable config lands in Milestone 2: {name}[/yellow]")
+    """Disable a built-in plugin in the local plugin state file."""
+    try:
+        set_plugin_enabled(name, False)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print(f"[green]Disabled plugin[/green] {name}")
 
 
 @removal_app.command("generate")
@@ -856,14 +884,116 @@ def unlink_provider(
 
 
 @import_app.command("google-takeout")
-def import_google_takeout(path: Annotated[Path, typer.Argument()]) -> None:
-    console.print(f"[yellow]Google Takeout local parsing lands in Milestone 3:[/yellow] {path}")
+def import_google_takeout(
+    path: Annotated[Path, typer.Argument(help="Path to a Google Takeout .zip archive.")],
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+) -> None:
+    """Parse a Google Takeout archive locally and store risk-indicator findings."""
+    init_db(_engine())
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        if profile.id is None:
+            raise typer.BadParameter("Profile must be saved before importing.")
+        with console.status("Analysing Google Takeout locally...", spinner="dots"):
+            summary = analyse_google_takeout(path, profile.id)
+        stored = [upsert_finding(session, profile, finding) for finding in summary.findings]
+        session.commit()
+        findings = list_findings(session, profile)
+        if json_output:
+            console.print_json(
+                json.dumps(
+                    {
+                        "archive": str(path),
+                        "files_seen": summary.files_seen,
+                        "new_findings": len(stored),
+                        "findings": [finding.model_dump(mode="json") for finding in stored],
+                    },
+                    default=str,
+                )
+            )
+            return
+        console.print(
+            f"[green]Analysed Google Takeout locally.[/green] "
+            f"Files seen: {summary.files_seen}; findings stored: {len(stored)}"
+        )
+        console.print(summary_panel(profile, findings))
+        console.print(findings_table(stored if stored else findings))
+        console.print(actions_panel(findings))
 
 
 @app.command("tui")
 def tui_command() -> None:
-    """Milestone 3 placeholder for the optional Textual dashboard."""
-    console.print("[yellow]Textual TUI dashboard lands in Milestone 3.[/yellow]")
+    """Open the Textual full-screen dashboard."""
+    run_tui()
+
+
+async def _run_ai_command(
+    profile_slug: str,
+    kind: str,
+    finding_id: str | None,
+    model: str | None,
+) -> str:
+    cfg = load_config()
+    if cfg.ai_provider == "none":
+        raise AIUnavailableError(
+            "AI provider is disabled. Set ai.provider = \"ollama\" in config.toml."
+        )
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        findings = list_findings(session, profile)
+        removals = list_removal_requests(session, profile)
+    context = build_findings_context(profile, findings, removals)
+    if kind == "summarise":
+        prompt = summarise_prompt(context)
+    elif kind == "actions":
+        prompt = actions_prompt(context)
+    else:
+        prompt = removal_email_prompt(context, finding_id)
+    return await ollama_generate(cfg, prompt, model=model)
+
+
+@ai_app.command("summarise")
+def ai_summarise(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    model: Annotated[str | None, typer.Option("--model")] = None,
+) -> None:
+    """Summarise stored findings with local Ollama. Personal data is redacted first."""
+    try:
+        response = asyncio.run(_run_ai_command(profile_slug, "summarise", None, model))
+    except AIUnavailableError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print(response)
+
+
+@ai_app.command("actions")
+def ai_actions(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    model: Annotated[str | None, typer.Option("--model")] = None,
+) -> None:
+    """Generate a prioritized action list with local Ollama."""
+    try:
+        response = asyncio.run(_run_ai_command(profile_slug, "actions", None, model))
+    except AIUnavailableError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print(response)
+
+
+@ai_app.command("removal-email")
+def ai_removal_email(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    finding: Annotated[str | None, typer.Option("--finding")] = None,
+    model: Annotated[str | None, typer.Option("--model")] = None,
+) -> None:
+    """Draft a removal email with local Ollama from redacted local context."""
+    try:
+        response = asyncio.run(_run_ai_command(profile_slug, "removal-email", finding, model))
+    except AIUnavailableError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print(response)
 
 
 @app.command("wipe")

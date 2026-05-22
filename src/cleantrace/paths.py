@@ -23,6 +23,10 @@ def config_path() -> Path:
     return config_dir() / CONFIG_FILE_NAME
 
 
+def plugin_state_path() -> Path:
+    return config_dir() / "plugins.json"
+
+
 def database_path() -> Path:
     return data_dir() / DATABASE_FILE_NAME
 

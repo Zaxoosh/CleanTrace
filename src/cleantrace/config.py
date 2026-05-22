@@ -21,6 +21,9 @@ respect_robots_txt = true
 
 [ai]
 provider = "none"
+ollama_url = "http://localhost:11434"
+ollama_model = "llama3.1"
+openai_compatible_url = ""
 
 [api_keys]
 # hibp = ""
@@ -35,6 +38,9 @@ class AppConfig:
     default_depth: str = "quick"
     redact_output: bool = True
     ai_provider: str = "none"
+    ollama_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3.1"
+    openai_compatible_url: str = ""
 
 
 def write_default_config(force: bool = False) -> Path:
@@ -67,6 +73,9 @@ def load_config() -> AppConfig:
         default_depth=str(scan.get("default_depth") or "quick"),
         redact_output=bool(scan.get("redact_output", True)),
         ai_provider=str(ai.get("provider") or "none"),
+        ollama_url=str(ai.get("ollama_url") or "http://localhost:11434"),
+        ollama_model=str(ai.get("ollama_model") or "llama3.1"),
+        openai_compatible_url=str(ai.get("openai_compatible_url") or ""),
     )
 
 

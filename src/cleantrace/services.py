@@ -7,6 +7,7 @@ from sqlmodel import Session, select
 
 from cleantrace.config import get_api_key
 from cleantrace.models import Finding, LinkedAccount, Profile, RemovalRequest, build_profile
+from cleantrace.plugin_state import plugin_enabled
 from cleantrace.plugins.base import PluginFinding, ScanTarget
 from cleantrace.plugins.github import GitHubConnectorPlugin
 from cleantrace.plugins.hibp import HIBPEmailPlugin
@@ -70,6 +71,8 @@ async def scan_username(
     )
     stored: list[Finding] = []
     for plugin in plugins_for_input("username"):
+        if not plugin_enabled(plugin.meta.name):
+            continue
         for plugin_finding in await plugin.run(target):
             stored.append(upsert_finding(session, profile, plugin_finding))
     session.commit()
@@ -87,7 +90,7 @@ async def scan_email(
     if profile.id is None:
         raise ValueError("Profile must be persisted before scanning.")
     key = api_key or get_api_key("hibp")
-    if not key:
+    if not key or not plugin_enabled("hibp_email"):
         return []
     target = ScanTarget(
         profile_id=profile.id,
@@ -113,6 +116,8 @@ async def scan_github_linked(
         raise ValueError("Profile must be persisted before scanning.")
     accounts = list_linked_accounts(session, profile, provider="github")
     stored: list[Finding] = []
+    if not plugin_enabled("github_connector"):
+        return stored
     plugin = GitHubConnectorPlugin()
     seen_accounts: set[str] = set()
     for account in accounts:
@@ -273,6 +278,7 @@ def upsert_finding(session: Session, profile: Profile, plugin_finding: PluginFin
             Finding.source_plugin == plugin_finding.source_plugin,
             Finding.input_type == plugin_finding.input_type,
             Finding.input_value_hash == plugin_finding.input_value_hash,
+            Finding.title == plugin_finding.title,
             Finding.url == plugin_finding.url,
         )
     ).first()
