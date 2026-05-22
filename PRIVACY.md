@@ -6,6 +6,7 @@ CleanTrace is local-first by default.
 
 - Raw profile identifiers are encrypted locally.
 - Findings store hashed scanned identifiers and public evidence metadata.
+- Linked account tokens are encrypted locally and can be removed with `cleantrace unlink`.
 - No telemetry is sent.
 - No cloud backend is used.
 - API keys and OAuth tokens are not printed.
@@ -16,7 +17,9 @@ Terminal output redacts emails, phones, tokens, and sensitive values by default.
 
 ## Network Requests
 
-Milestone 1 username scanning makes direct HTTP requests to public profile URLs listed in the local site definition database. Future API-based modules will be optional and disabled unless configured.
+Username scanning makes direct HTTP requests to public profile URLs listed in the local site definition database.
+
+HIBP checks use the official Have I Been Pwned API only when an API key is configured. GitHub checks use official GitHub APIs for accounts you explicitly link. CleanTrace does not upload repository contents; public repository files sampled for secret-pattern checks are fetched from GitHub and scanned locally.
 
 ## AI
 

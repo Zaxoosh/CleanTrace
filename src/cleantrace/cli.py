@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 from pathlib import Path
 from typing import Annotated
 
@@ -13,11 +14,19 @@ from sqlalchemy import Engine
 from sqlmodel import Session, select
 
 from cleantrace import __version__
-from cleantrace.config import load_config, write_default_config
+from cleantrace.config import get_api_key, load_config, write_default_config
 from cleantrace.db import get_engine, get_profile_by_slug, init_db, list_findings
-from cleantrace.models import Finding, Profile
+from cleantrace.models import Finding, Profile, RemovalRequest
 from cleantrace.paths import config_path, database_path, key_path
-from cleantrace.plugins.manager import built_in_plugins
+from cleantrace.plugins.manager import built_in_plugin_metadata
+from cleantrace.plugins.pwned_passwords import check_pwned_password
+from cleantrace.removal import (
+    REMOVAL_STATUSES,
+    broker_names,
+    find_broker,
+    render_broker_request,
+    render_finding_request,
+)
 from cleantrace.render import (
     acceptable_use_panel,
     actions_panel,
@@ -30,7 +39,21 @@ from cleantrace.render import (
 from cleantrace.reports import write_report
 from cleantrace.scoring import exposure_score, top_actions
 from cleantrace.security import CryptoBox, redact_text
-from cleantrace.services import create_profile, scan_username
+from cleantrace.services import (
+    create_profile,
+    create_removal_request,
+    get_finding,
+    get_removal_request,
+    link_account,
+    list_removal_requests,
+    scan_email,
+    scan_github_linked,
+    scan_username,
+    update_removal_status,
+)
+from cleantrace.services import (
+    unlink_provider as unlink_provider_service,
+)
 
 app = typer.Typer(
     name="cleantrace",
@@ -79,6 +102,45 @@ def _split_csv(values: list[str] | None) -> list[str]:
     for value in values:
         result.extend(part.strip() for part in value.split(",") if part.strip())
     return result
+
+
+def _run_json_command(args: list[str]) -> str | None:
+    try:
+        completed = subprocess.run(
+            args,
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=15,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+    value = completed.stdout.strip()
+    return value or None
+
+
+def _github_from_gh() -> tuple[str | None, str | None]:
+    token = _run_json_command(["gh", "auth", "token"])
+    username = _run_json_command(["gh", "api", "user", "--jq", ".login"])
+    return username, token
+
+
+def removal_table(requests: list[RemovalRequest]) -> Table:
+    table = Table(title="Removal Requests", box=box.SIMPLE_HEAVY)
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Status")
+    table.add_column("Subject")
+    table.add_column("Broker")
+    table.add_column("Finding")
+    for request in requests:
+        table.add_row(
+            request.id[:10],
+            request.status,
+            request.subject,
+            request.broker_name or "",
+            request.finding_id[:10] if request.finding_id else "",
+        )
+    return table
 
 
 @app.callback()
@@ -291,17 +353,183 @@ def scan_all_command(
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
-    """Run all Milestone 1 checks for a profile."""
-    scan_username_command(None, profile_slug, depth, json_output)
+    """Run username, HIBP email, and linked-account checks for a profile."""
+    if depth not in {"quick", "standard", "deep"}:
+        raise typer.BadParameter("depth must be quick, standard, or deep.")
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        new_findings: list[Finding] = []
+        for username in profile.usernames(crypto):
+            with console.status(f"Checking public profiles for {username}...", spinner="dots"):
+                new_findings.extend(
+                    asyncio.run(
+                        scan_username(session, profile=profile, username=username, depth=depth)
+                    )
+                )
+        hibp_key = get_api_key("hibp")
+        if hibp_key:
+            for email in profile.emails(crypto):
+                with console.status(
+                    "Checking HIBP for configured profile email...",
+                    spinner="dots",
+                ):
+                    new_findings.extend(
+                        asyncio.run(
+                            scan_email(
+                                session,
+                                profile=profile,
+                                email=email,
+                                depth=depth,
+                                api_key=hibp_key,
+                            )
+                        )
+                    )
+        with console.status("Checking linked GitHub accounts...", spinner="dots"):
+            new_findings.extend(
+                asyncio.run(scan_github_linked(session, crypto, profile=profile))
+            )
+        findings = list_findings(session, profile)
+        if json_output:
+            console.print_json(
+                json.dumps(
+                    {
+                        "profile": profile.slug,
+                        "new_findings": len(new_findings),
+                        "exposure_score": exposure_score(findings, profile),
+                        "top_actions": top_actions(findings),
+                        "findings": [finding.model_dump(mode="json") for finding in findings],
+                    },
+                    default=str,
+                )
+            )
+            return
+        console.print(summary_panel(profile, findings))
+        console.print(findings_table(new_findings if new_findings else findings))
+        console.print(actions_panel(findings))
 
 
 @scan_app.command("email")
-def scan_email_command() -> None:
-    """Milestone 2 placeholder for HIBP and safe account exposure checks."""
-    console.print(
-        "[yellow]Email scanning lands in Milestone 2. "
-        "No password reset or login checks will be used.[/yellow]"
-    )
+def scan_email_command(
+    value: Annotated[
+        str | None,
+        typer.Argument(help="Email to scan. Omit to use profile emails."),
+    ] = None,
+    profile_slug: Annotated[
+        str,
+        typer.Option("--profile", "-p", help="Explicit consent profile slug."),
+    ] = "default",
+    depth: Annotated[str, typer.Option("--depth", help="quick, standard, or deep.")] = "quick",
+    hibp: Annotated[
+        bool,
+        typer.Option("--hibp/--no-hibp", help="Use official HIBP API."),
+    ] = True,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+) -> None:
+    """Check email breach exposure through the official HIBP API when configured."""
+    if depth not in {"quick", "standard", "deep"}:
+        raise typer.BadParameter("depth must be quick, standard, or deep.")
+    init_db(_engine())
+    crypto = CryptoBox()
+    api_key = get_api_key("hibp") if hibp else None
+    if hibp and not api_key:
+        console.print(
+            "[yellow]HIBP API key not configured.[/yellow] Set api_keys.hibp in "
+            f"{config_path()} or CLEANTRACE_HIBP_API_KEY."
+        )
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        emails = [value] if value else profile.emails(crypto)
+        if not emails:
+            raise typer.BadParameter("No email supplied and profile has no emails.")
+        all_new: list[Finding] = []
+        if api_key:
+            for email in emails:
+                with console.status("Checking HIBP using the official API...", spinner="dots"):
+                    all_new.extend(
+                        asyncio.run(
+                            scan_email(
+                                session,
+                                profile=profile,
+                                email=email,
+                                depth=depth,
+                                api_key=api_key,
+                            )
+                        )
+                    )
+        findings = list_findings(session, profile)
+        if json_output:
+            console.print_json(
+                json.dumps(
+                    {
+                        "profile": profile.slug,
+                        "new_findings": len(all_new),
+                        "exposure_score": exposure_score(findings, profile),
+                        "top_actions": top_actions(findings),
+                        "findings": [finding.model_dump(mode="json") for finding in findings],
+                    },
+                    default=str,
+                )
+            )
+            return
+        console.print(summary_panel(profile, findings))
+        console.print(findings_table(all_new if all_new else findings))
+        console.print(actions_panel(findings))
+
+
+@scan_app.command("github")
+def scan_github_command(
+    profile_slug: Annotated[
+        str,
+        typer.Option("--profile", "-p", help="Explicit consent profile slug."),
+    ] = "default",
+    include_private: Annotated[
+        bool,
+        typer.Option(
+            "--include-private",
+            help="Scan private repos only when linked with token opt-in.",
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+) -> None:
+    """Scan linked GitHub account public exposure through official GitHub APIs."""
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        with console.status("Checking linked GitHub accounts...", spinner="dots"):
+            new_findings = asyncio.run(
+                scan_github_linked(
+                    session,
+                    crypto,
+                    profile=profile,
+                    include_private=include_private,
+                )
+            )
+        findings = list_findings(session, profile)
+        if json_output:
+            console.print_json(
+                json.dumps(
+                    {
+                        "profile": profile.slug,
+                        "new_findings": len(new_findings),
+                        "exposure_score": exposure_score(findings, profile),
+                        "findings": [finding.model_dump(mode="json") for finding in findings],
+                    },
+                    default=str,
+                )
+            )
+            return
+        console.print(summary_panel(profile, findings))
+        console.print(findings_table(new_findings if new_findings else findings))
+        console.print(actions_panel(findings))
 
 
 @scan_app.command("phone")
@@ -311,6 +539,31 @@ def scan_phone_command() -> None:
         "[yellow]Phone scanning lands in Milestone 2. "
         "CleanTrace will not send SMS or verify numbers.[/yellow]"
     )
+
+
+@scan_app.command("password")
+def scan_password_command(
+    password_value: Annotated[
+        str | None,
+        typer.Option("--password", help="Avoid in shell history; prompt is safer."),
+    ] = None,
+) -> None:
+    """Check a password against HIBP k-anonymity API without storing it."""
+    password_value = password_value or Prompt.ask(
+        "Password to check locally with HIBP k-anonymity",
+        password=True,
+    )
+    count = asyncio.run(check_pwned_password(password_value))
+    if count:
+        console.print(
+            f"[red]This password hash appears {count:,} time(s) in HIBP data.[/red]\n"
+            "Do not reuse it. Change it anywhere it is used and prefer a password manager."
+        )
+    else:
+        console.print(
+            "[green]No match returned by the HIBP k-anonymity range API.[/green]\n"
+            "This does not prove the password is safe; use a unique generated password."
+        )
 
 
 @scan_app.command("name")
@@ -397,14 +650,14 @@ def plugins_list() -> None:
     table.add_column("API key")
     table.add_column("Default")
     table.add_column("Description")
-    for plugin in built_in_plugins():
+    for meta in built_in_plugin_metadata():
         table.add_row(
-            plugin.meta.name,
-            ", ".join(plugin.meta.input_types),
-            plugin.meta.risk_level,
-            "yes" if plugin.meta.needs_api_key else "no",
-            "yes" if plugin.meta.enabled_by_default else "no",
-            plugin.meta.description,
+            meta.name,
+            ", ".join(meta.input_types),
+            meta.risk_level,
+            "yes" if meta.needs_api_key else "no",
+            "yes" if meta.enabled_by_default else "no",
+            meta.description,
         )
     console.print(table)
 
@@ -423,35 +676,145 @@ def plugins_disable(name: Annotated[str, typer.Argument()]) -> None:
 
 @removal_app.command("generate")
 def removal_generate(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
     finding: Annotated[str | None, typer.Option("--finding")] = None,
     broker: Annotated[str | None, typer.Option("--broker")] = None,
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
 ) -> None:
-    """Milestone 2 placeholder for removal request templates."""
-    subject = finding or broker or "manual review"
-    console.print(
-        "[yellow]Removal templates land in Milestone 2.[/yellow]\n"
-        f"Subject: {redact_text(subject)}\n"
-        "Planned templates: UK GDPR erasure, rectification, data broker opt-out, forum deletion."
-    )
+    """Generate a local removal request draft for a finding or broker."""
+    if not finding and not broker:
+        raise typer.BadParameter("Provide --finding or --broker.")
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        legal_name = profile.legal_name(crypto)
+        recipient = None
+        broker_name = None
+        finding_id = None
+        if finding:
+            stored_finding = get_finding(session, finding)
+            if not stored_finding or stored_finding.profile_id != profile.id:
+                raise typer.BadParameter(f"Finding '{finding}' does not exist for this profile.")
+            subject, body = render_finding_request(profile, stored_finding, legal_name)
+            finding_id = stored_finding.id
+        else:
+            broker_record = find_broker(broker or "")
+            if not broker_record:
+                raise typer.BadParameter(
+                    f"Unknown broker. Available brokers: {', '.join(broker_names())}"
+                )
+            subject, body = render_broker_request(profile, broker_record, legal_name)
+            broker_name = broker_record.name
+            recipient = broker_record.email or broker_record.opt_out_url
+        request = create_removal_request(
+            session,
+            crypto,
+            profile=profile,
+            subject=subject,
+            body=body,
+            finding_id=finding_id,
+            broker_name=broker_name,
+            recipient=recipient,
+        )
+    if output:
+        output.write_text(body, encoding="utf-8")
+        console.print(f"[green]Draft written:[/green] {output.resolve()}")
+    console.print(f"[green]Drafted removal request[/green] {request.id[:10]}: {subject}")
+    console.print(redact_text(body))
 
 
 @removal_app.command("track")
-def removal_track() -> None:
-    """Milestone 2 placeholder for cleanup tracking."""
-    console.print("[yellow]Removal tracking lands in Milestone 2.[/yellow]")
+def removal_track(
+    request_id: Annotated[str | None, typer.Option("--request")] = None,
+    finding: Annotated[str | None, typer.Option("--finding")] = None,
+    status: Annotated[str, typer.Option("--status")] = "sent",
+) -> None:
+    """Update a local removal request status."""
+    if status not in REMOVAL_STATUSES:
+        raise typer.BadParameter(f"Status must be one of: {', '.join(sorted(REMOVAL_STATUSES))}")
+    if not request_id and not finding:
+        raise typer.BadParameter("Provide --request or --finding.")
+    init_db(_engine())
+    with Session(_engine()) as session:
+        request = get_removal_request(session, request_id) if request_id else None
+        if not request and finding:
+            request = next(
+                (item for item in list_removal_requests(session) if item.finding_id == finding),
+                None,
+            )
+        if not request:
+            raise typer.BadParameter("Removal request not found.")
+        updated = update_removal_status(session, request, status)
+        console.print(f"[green]Updated[/green] {updated.id[:10]} -> {updated.status}")
 
 
 @removal_app.command("list")
-def removal_list() -> None:
-    """Milestone 2 placeholder for removal status listing."""
-    console.print("[yellow]Removal status listing lands in Milestone 2.[/yellow]")
+def removal_list(
+    profile_slug: Annotated[str | None, typer.Option("--profile", "-p")] = None,
+    show_sensitive: Annotated[bool, typer.Option("--show-sensitive")] = False,
+) -> None:
+    """List local removal requests."""
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = get_profile_by_slug(session, profile_slug) if profile_slug else None
+        requests = list_removal_requests(session, profile)
+        console.print(removal_table(requests))
+        if show_sensitive:
+            for request in requests:
+                console.print(f"\n[bold]{request.id}[/bold] {request.subject}")
+                console.print(request.body(crypto))
 
 
 @link_app.command("github")
-def link_github() -> None:
-    console.print(
-        "[yellow]GitHub connector lands in Milestone 2 and will use official APIs only.[/yellow]"
-    )
+def link_github(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    username: Annotated[str | None, typer.Option("--username")] = None,
+    token: Annotated[
+        str | None,
+        typer.Option("--token", help="GitHub token; prefer gh auth."),
+    ] = None,
+    from_gh: Annotated[bool, typer.Option("--from-gh/--no-from-gh")] = True,
+    private_scan: Annotated[
+        bool,
+        typer.Option("--private-scan", help="Allow explicit private repo scanning later."),
+    ] = False,
+) -> None:
+    """Link your own GitHub account. Tokens are encrypted locally."""
+    init_db(_engine())
+    gh_username = None
+    gh_token = None
+    if from_gh and (not username or not token):
+        gh_username, gh_token = _github_from_gh()
+    username = username or gh_username
+    token = token or gh_token
+    if not username:
+        username = Prompt.ask("GitHub username")
+    if private_scan and not token:
+        token = Prompt.ask("GitHub token for private scan opt-in", password=True)
+    if private_scan and not Confirm.ask(
+        "Private scan can inspect your own private repo metadata and sampled files. Continue?",
+        default=False,
+    ):
+        private_scan = False
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        account = link_account(
+            session,
+            crypto,
+            profile=profile,
+            provider="github",
+            username=username,
+            token=token,
+            public_only=not private_scan,
+            scopes=["gh-cli"] if token and from_gh else [],
+        )
+        console.print(
+            f"[green]Linked GitHub account[/green] {redact_text(username)} "
+            f"for profile [bold]{profile.slug}[/bold] as record {account.id}."
+        )
 
 
 @link_app.command("google")
@@ -477,12 +840,19 @@ def link_steam() -> None:
 
 
 @unlink_app.callback(invoke_without_command=True)
-def unlink_provider(provider: Annotated[str | None, typer.Argument()] = None) -> None:
+def unlink_provider(
+    provider: Annotated[str | None, typer.Argument()] = None,
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+) -> None:
     if provider:
-        console.print(
-            f"[yellow]No stored token for {provider}. "
-            "Connector storage lands in Milestone 2.[/yellow]"
-        )
+        init_db(_engine())
+        with Session(_engine()) as session:
+            profile = get_profile_by_slug(session, profile_slug)
+            if not profile:
+                console.print(f"[yellow]No profile found: {profile_slug}[/yellow]")
+                return
+            removed = unlink_provider_service(session, profile, provider)
+        console.print(f"[green]Disconnected {removed} {provider} account(s).[/green]")
 
 
 @import_app.command("google-takeout")

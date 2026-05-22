@@ -25,3 +25,4 @@ def test_redaction_helpers() -> None:
     assert redact("person@example.com") == "pe***@ex***"
     assert redact("+44 7700 900123") == "***0123"
     assert "[redacted-email]" in redact_text("mail me at person@example.com")
+    assert "2026-05-22" in redact_text("Generated locally on 2026-05-22.")

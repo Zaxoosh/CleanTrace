@@ -16,7 +16,7 @@ Open a private security advisory or contact the maintainers without posting expl
 
 ## Security Boundaries
 
-CleanTrace encrypts raw profile identifiers locally, but it cannot protect data if the local machine, user account, Python environment, or installed plugins are compromised. The local database and encryption key should both be treated as sensitive.
+CleanTrace encrypts raw profile identifiers and linked account tokens locally, but it cannot protect data if the local machine, user account, Python environment, or installed plugins are compromised. The local database and encryption key should both be treated as sensitive.
 
 ## Non-Goals
 

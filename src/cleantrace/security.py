@@ -49,8 +49,16 @@ def redact_text(text: str, show_sensitive: bool = False) -> str:
     if show_sensitive:
         return text
     text = EMAIL_RE.sub("[redacted-email]", text)
-    text = PHONE_RE.sub("[redacted-phone]", text)
+    text = PHONE_RE.sub(redact_phone_match, text)
     return TOKEN_RE.sub("[redacted-token]", text)
+
+
+def redact_phone_match(match: re.Match[str]) -> str:
+    value = match.group(0)
+    digits = re.sub(r"\D", "", value)
+    if len(digits) < 9:
+        return value
+    return "[redacted-phone]"
 
 
 class CryptoBox:

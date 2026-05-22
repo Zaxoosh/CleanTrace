@@ -39,6 +39,7 @@ class ScanTarget:
     value: str
     value_hash: str
     depth: str = "quick"
+    options: dict[str, object] = field(default_factory=dict)
 
 
 class CleanTracePlugin(Protocol):

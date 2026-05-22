@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -70,6 +71,11 @@ def load_config() -> AppConfig:
 
 
 def get_api_key(name: str) -> str | None:
+    env_value = os.getenv(f"CLEANTRACE_{name.upper()}_API_KEY") or os.getenv(
+        f"{name.upper()}_API_KEY"
+    )
+    if env_value:
+        return env_value
     try:
         import tomllib
 

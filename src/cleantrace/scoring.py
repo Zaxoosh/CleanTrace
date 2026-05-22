@@ -14,6 +14,12 @@ def finding_points(finding: Finding, profile: Profile | None = None) -> int:
     }.get(finding.severity, 1)
     confidence_factor = max(finding.confidence, 10) / 100
     tags = set(finding.tags)
+    if "breach" in tags:
+        base += 8
+    if tags & {"password", "credential", "secret"}:
+        base += 15
+    if "identity-link" in tags:
+        base += 4
     protected_tags = {"location", "phone", "family", "work-role", "real-name", "professional"}
     if profile and profile.risk_sensitivity == "protected-role" and tags & protected_tags:
         base += 8

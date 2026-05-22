@@ -5,8 +5,11 @@ from datetime import UTC, datetime
 
 from sqlmodel import Session, select
 
-from cleantrace.models import Finding, Profile, build_profile
+from cleantrace.config import get_api_key
+from cleantrace.models import Finding, LinkedAccount, Profile, RemovalRequest, build_profile
 from cleantrace.plugins.base import PluginFinding, ScanTarget
+from cleantrace.plugins.github import GitHubConnectorPlugin
+from cleantrace.plugins.hibp import HIBPEmailPlugin
 from cleantrace.plugins.manager import plugins_for_input
 from cleantrace.security import CryptoBox, stable_hash
 
@@ -71,6 +74,194 @@ async def scan_username(
             stored.append(upsert_finding(session, profile, plugin_finding))
     session.commit()
     return stored
+
+
+async def scan_email(
+    session: Session,
+    *,
+    profile: Profile,
+    email: str,
+    depth: str,
+    api_key: str | None = None,
+) -> list[Finding]:
+    if profile.id is None:
+        raise ValueError("Profile must be persisted before scanning.")
+    key = api_key or get_api_key("hibp")
+    if not key:
+        return []
+    target = ScanTarget(
+        profile_id=profile.id,
+        input_type="email",
+        value=email,
+        value_hash=stable_hash(email),
+        depth=depth,
+    )
+    plugin = HIBPEmailPlugin(key)
+    stored = [upsert_finding(session, profile, finding) for finding in await plugin.run(target)]
+    session.commit()
+    return stored
+
+
+async def scan_github_linked(
+    session: Session,
+    crypto: CryptoBox,
+    *,
+    profile: Profile,
+    include_private: bool = False,
+) -> list[Finding]:
+    if profile.id is None:
+        raise ValueError("Profile must be persisted before scanning.")
+    accounts = list_linked_accounts(session, profile, provider="github")
+    stored: list[Finding] = []
+    plugin = GitHubConnectorPlugin()
+    seen_accounts: set[str] = set()
+    for account in accounts:
+        if account.account_id_hash in seen_accounts:
+            continue
+        seen_accounts.add(account.account_id_hash)
+        username = account.username(crypto)
+        if not username:
+            continue
+        token = account.token(crypto)
+        target = ScanTarget(
+            profile_id=profile.id,
+            input_type="github_account",
+            value=username,
+            value_hash=stable_hash(username),
+            options={
+                "username": username,
+                "token": token,
+                "include_private": include_private and not account.public_only,
+            },
+        )
+        for plugin_finding in await plugin.run(target):
+            stored.append(upsert_finding(session, profile, plugin_finding))
+        account.last_scanned_at = datetime.now(UTC)
+        session.add(account)
+    session.commit()
+    return stored
+
+
+def link_account(
+    session: Session,
+    crypto: CryptoBox,
+    *,
+    profile: Profile,
+    provider: str,
+    username: str,
+    token: str | None = None,
+    display_name: str | None = None,
+    public_only: bool = True,
+    scopes: list[str] | None = None,
+) -> LinkedAccount:
+    if profile.id is None:
+        raise ValueError("Profile id is required.")
+    existing = session.exec(
+        select(LinkedAccount).where(
+            LinkedAccount.profile_id == profile.id,
+            LinkedAccount.provider == provider,
+            LinkedAccount.account_id_hash == stable_hash(username),
+        )
+    ).first()
+    if existing:
+        existing.username_enc = crypto.encrypt_text(username)
+        existing.display_name_enc = crypto.encrypt_text(display_name or username)
+        existing.token_enc = crypto.encrypt_text(token)
+        existing.public_only = public_only
+        existing.scopes_json = json.dumps(scopes or [])
+        session.add(existing)
+        session.commit()
+        session.refresh(existing)
+        return existing
+    account = LinkedAccount(
+        profile_id=profile.id,
+        provider=provider,
+        account_id_hash=stable_hash(username),
+        display_name_enc=crypto.encrypt_text(display_name or username),
+        username_enc=crypto.encrypt_text(username),
+        token_enc=crypto.encrypt_text(token),
+        public_only=public_only,
+        scopes_json=json.dumps(scopes or []),
+    )
+    session.add(account)
+    session.commit()
+    session.refresh(account)
+    return account
+
+
+def list_linked_accounts(
+    session: Session,
+    profile: Profile,
+    provider: str | None = None,
+) -> list[LinkedAccount]:
+    if profile.id is None:
+        return []
+    statement = select(LinkedAccount).where(LinkedAccount.profile_id == profile.id)
+    if provider:
+        statement = statement.where(LinkedAccount.provider == provider)
+    return list(session.exec(statement).all())
+
+
+def unlink_provider(session: Session, profile: Profile, provider: str) -> int:
+    removed = 0
+    for account in list_linked_accounts(session, profile, provider=provider):
+        session.delete(account)
+        removed += 1
+    session.commit()
+    return removed
+
+
+def create_removal_request(
+    session: Session,
+    crypto: CryptoBox,
+    *,
+    profile: Profile,
+    subject: str,
+    body: str,
+    finding_id: str | None = None,
+    broker_name: str | None = None,
+    recipient: str | None = None,
+    request_type: str = "erasure",
+) -> RemovalRequest:
+    if profile.id is None:
+        raise ValueError("Profile id is required.")
+    request = RemovalRequest(
+        profile_id=profile.id,
+        finding_id=finding_id,
+        broker_name=broker_name,
+        request_type=request_type,
+        recipient=recipient,
+        subject=subject,
+        body_enc=crypto.encrypt_text(body) or "",
+    )
+    session.add(request)
+    session.commit()
+    session.refresh(request)
+    return request
+
+
+def list_removal_requests(session: Session, profile: Profile | None = None) -> list[RemovalRequest]:
+    statement = select(RemovalRequest)
+    if profile and profile.id is not None:
+        statement = statement.where(RemovalRequest.profile_id == profile.id)
+    return list(session.exec(statement).all())
+
+
+def update_removal_status(session: Session, request: RemovalRequest, status: str) -> RemovalRequest:
+    request.status = status
+    request.updated_at = datetime.now(UTC)
+    session.add(request)
+    session.commit()
+    session.refresh(request)
+    return request
+
+
+def get_finding(session: Session, finding_id: str) -> Finding | None:
+    return session.get(Finding, finding_id)
+
+
+def get_removal_request(session: Session, request_id: str) -> RemovalRequest | None:
+    return session.get(RemovalRequest, request_id)
 
 
 def upsert_finding(session: Session, profile: Profile, plugin_finding: PluginFinding) -> Finding:

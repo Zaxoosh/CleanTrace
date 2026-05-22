@@ -63,6 +63,12 @@ class Profile(SQLModel, table=True):
     def emails(self, crypto: CryptoBox) -> list[str]:
         return list(crypto.decrypt_json(self.emails_enc, []))
 
+    def domains(self, crypto: CryptoBox) -> list[str]:
+        return list(crypto.decrypt_json(self.domains_enc, []))
+
+    def legal_name(self, crypto: CryptoBox) -> str | None:
+        return crypto.decrypt_text(self.legal_name_enc)
+
 
 def build_profile(
     *,
@@ -128,3 +134,45 @@ class Finding(SQLModel, table=True):
     @property
     def tags(self) -> list[str]:
         return list(json.loads(self.tags_json or "[]"))
+
+
+class LinkedAccount(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    profile_id: int = Field(index=True)
+    provider: str = Field(index=True)
+    account_id_hash: str = Field(index=True)
+    display_name_enc: str | None = None
+    username_enc: str | None = None
+    token_enc: str | None = None
+    public_only: bool = True
+    scopes_json: str = "[]"
+    linked_at: datetime = Field(default_factory=utc_now)
+    last_scanned_at: datetime | None = None
+
+    def username(self, crypto: CryptoBox) -> str | None:
+        return crypto.decrypt_text(self.username_enc)
+
+    def token(self, crypto: CryptoBox) -> str | None:
+        return crypto.decrypt_text(self.token_enc)
+
+    @property
+    def scopes(self) -> list[str]:
+        return list(json.loads(self.scopes_json or "[]"))
+
+
+class RemovalRequest(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
+    profile_id: int = Field(index=True)
+    finding_id: str | None = Field(default=None, index=True)
+    broker_name: str | None = Field(default=None, index=True)
+    request_type: str = "erasure"
+    status: str = Field(default="drafted", index=True)
+    recipient: str | None = None
+    subject: str
+    body_enc: str
+    notes: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    def body(self, crypto: CryptoBox) -> str:
+        return crypto.decrypt_text(self.body_enc) or ""
