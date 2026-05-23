@@ -49,6 +49,21 @@ They do not crawl, follow links, download files, log in, or store raw page conte
 Manual evidence import is local-only. Text is redacted before being stored as metadata. Screenshots
 are recorded as file metadata only; image analysis is not performed.
 
+Social/profile-site scanning checks public profile URLs for usernames in your consent profile.
+Those websites may receive profile URL requests. CleanTrace does not log in, scrape private content,
+or bypass anti-abuse controls.
+
+Data broker scanning stores local removal guidance and metadata findings. Provider-backed broker
+checks use the configured public web provider. CleanTrace does not submit opt-out forms or upload ID
+documents.
+
+Guided scan sessions are stored locally and contain profile id, requested modules, completed/skipped
+modules, pending setup modules, timestamps, and a resume token. They do not contain raw profile
+identifiers.
+
+Monitoring snapshots are local JSON files containing finding ids and summary metadata. Alerts are
+disabled by default and redact sensitive values unless `alerts.include_sensitive_in_alerts = true`.
+
 ## Never Stored
 
 CleanTrace should not store:
@@ -61,6 +76,8 @@ CleanTrace should not store:
 - raw leaked database rows
 - full provider raw responses
 - raw Tor page content by default
+- scan-session raw identifiers
+- alert sensitive content unless explicitly enabled
 
 ## Wiping Local Data
 

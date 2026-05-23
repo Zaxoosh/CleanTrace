@@ -22,20 +22,30 @@ from cleantrace.ai import (
     removal_email_prompt,
     summarise_prompt,
 )
-from cleantrace.config import config_set, get_api_key, load_config, write_default_config
+from cleantrace.alerts import alert_summary
+from cleantrace.config import config_get, config_set, get_api_key, load_config, write_default_config
 from cleantrace.db import get_engine, get_profile_by_slug, init_db, list_findings
 from cleantrace.evidence import import_evidence_file
 from cleantrace.models import Finding, Profile, RemovalRequest
+from cleantrace.monitoring import load_monitor_state, update_monitor_snapshot
 from cleantrace.paths import config_path, database_path, key_path
 from cleantrace.phone import parse_phone_number
 from cleantrace.plugin_state import load_plugin_states, set_plugin_enabled
+from cleantrace.plugins.data_brokers import broker_removal_plan
 from cleantrace.plugins.manager import built_in_plugin_metadata
 from cleantrace.plugins.pwned_passwords import check_pwned_password
 from cleantrace.plugins.tor_public_check import check_tor_urls
+from cleantrace.readiness import (
+    MODULE_DEPENDENCIES,
+    ModuleReadiness,
+    config_sections,
+    readiness_for,
+)
 from cleantrace.removal import (
     REMOVAL_STATUSES,
     broker_names,
     find_broker,
+    load_brokers,
     render_broker_request,
     render_finding_request,
 )
@@ -49,6 +59,14 @@ from cleantrace.render import (
     summary_panel,
 )
 from cleantrace.reports import write_report
+from cleantrace.scan_sessions import (
+    ScanSession,
+    cancel_session,
+    create_session,
+    latest_resumable_session,
+    load_sessions,
+    update_session,
+)
 from cleantrace.scoring import exposure_score, top_actions
 from cleantrace.security import CryptoBox, redact_text
 from cleantrace.services import (
@@ -60,10 +78,12 @@ from cleantrace.services import (
     link_account,
     list_removal_requests,
     remove_profile_phone,
+    scan_brokers,
     scan_email,
     scan_github_linked,
     scan_intel,
     scan_phone_profile,
+    scan_social,
     scan_username,
     scan_web_discovery,
     update_removal_status,
@@ -96,6 +116,11 @@ ai_app = typer.Typer(
     help="Local AI assistant commands. Disabled unless explicitly configured.",
     no_args_is_help=True,
 )
+brokers_app = typer.Typer(
+    help="Explore data broker sources and removal plans.",
+    no_args_is_help=True,
+)
+monitor_app = typer.Typer(help="Local monitoring and change detection.", no_args_is_help=True)
 
 app.add_typer(profile_app, name="profile")
 profile_app.add_typer(profile_phone_app, name="phone")
@@ -106,6 +131,8 @@ app.add_typer(link_app, name="link")
 app.add_typer(unlink_app, name="unlink")
 app.add_typer(import_app, name="import")
 app.add_typer(ai_app, name="ai")
+app.add_typer(brokers_app, name="brokers")
+app.add_typer(monitor_app, name="monitor")
 
 
 def _engine() -> Engine:
@@ -155,6 +182,110 @@ def _github_from_gh() -> tuple[str | None, str | None]:
     return username, token
 
 
+def _profile_for_session(session: Session, scan_session: ScanSession) -> Profile:
+    profile = session.get(Profile, scan_session.profile_id)
+    if not profile:
+        raise typer.BadParameter("Saved scan session refers to a missing profile.")
+    if not profile.consent:
+        raise typer.BadParameter("Saved scan session profile no longer has consent.")
+    return profile
+
+
+def _run_scan_modules(
+    session: Session,
+    crypto: CryptoBox,
+    profile: Profile,
+    scan_session: ScanSession,
+    modules: list[str],
+) -> list[Finding]:
+    new_findings: list[Finding] = []
+    for module in modules:
+        if module in scan_session.completed_modules:
+            continue
+        ready = readiness_for([module])[0]
+        if not ready.ready and not ready.dependency.can_run_without_config:
+            if module not in scan_session.pending_setup_modules:
+                scan_session.pending_setup_modules.append(module)
+            continue
+        if module == "username":
+            for username in profile.usernames(crypto):
+                new_findings.extend(
+                    asyncio.run(
+                        scan_username(
+                            session,
+                            profile=profile,
+                            username=username,
+                            depth=scan_session.depth,
+                        )
+                    )
+                )
+        elif module == "social":
+            new_findings.extend(
+                asyncio.run(
+                    scan_social(session, crypto, profile=profile, depth=scan_session.depth)
+                )
+            )
+        elif module == "email":
+            key = get_api_key("hibp")
+            if key:
+                for email in profile.emails(crypto):
+                    new_findings.extend(
+                        asyncio.run(
+                            scan_email(
+                                session,
+                                profile=profile,
+                                email=email,
+                                depth=scan_session.depth,
+                                api_key=key,
+                            )
+                        )
+                    )
+        elif module == "phone":
+            new_findings.extend(scan_phone_profile(session, crypto, profile=profile))
+        elif module == "web":
+            new_findings.extend(
+                asyncio.run(
+                    scan_web_discovery(
+                        session,
+                        crypto,
+                        profile=profile,
+                        depth=scan_session.depth,
+                        query_set="all",
+                    )
+                )
+            )
+        elif module == "brokers":
+            new_findings.extend(
+                asyncio.run(
+                    scan_brokers(
+                        session,
+                        crypto,
+                        profile=profile,
+                        depth=scan_session.depth,
+                    )
+                )
+            )
+        elif module == "intel":
+            new_findings.extend(
+                asyncio.run(
+                    scan_intel(session, crypto, profile=profile, depth=scan_session.depth)
+                )
+            )
+        elif module == "github":
+            new_findings.extend(asyncio.run(scan_github_linked(session, crypto, profile=profile)))
+        else:
+            scan_session.skipped_modules.append(module)
+            continue
+        if module not in scan_session.completed_modules:
+            scan_session.completed_modules.append(module)
+    requested = set(scan_session.requested_modules)
+    complete_or_skipped = set(scan_session.completed_modules) | set(scan_session.skipped_modules)
+    if requested <= complete_or_skipped:
+        scan_session.status = "complete"
+    update_session(scan_session)
+    return new_findings
+
+
 def removal_table(requests: list[RemovalRequest]) -> Table:
     table = Table(title="Removal Requests", box=box.SIMPLE_HEAVY)
     table.add_column("ID", style="dim", no_wrap=True)
@@ -171,6 +302,197 @@ def removal_table(requests: list[RemovalRequest]) -> Table:
             request.finding_id[:10] if request.finding_id else "",
         )
     return table
+
+
+def readiness_table(readiness: list[ModuleReadiness]) -> Table:
+    table = Table(title="Config Readiness", box=box.SIMPLE_HEAVY)
+    table.add_column("Module", style="bold")
+    table.add_column("Ready")
+    table.add_column("Privacy Impact")
+    table.add_column("Status")
+    table.add_column("Fallback")
+    for item in readiness:
+        table.add_row(
+            item.dependency.label,
+            "yes" if item.ready else "no",
+            item.dependency.privacy_impact,
+            item.reason,
+            item.dependency.fallback_mode,
+        )
+    return table
+
+
+def session_table(sessions: list[ScanSession]) -> Table:
+    table = Table(title="Scan Sessions", box=box.SIMPLE_HEAVY)
+    table.add_column("ID")
+    table.add_column("Profile")
+    table.add_column("Depth")
+    table.add_column("Status")
+    table.add_column("Completed")
+    table.add_column("Pending")
+    table.add_column("Resume")
+    for session in sessions:
+        table.add_row(
+            session.scan_session_id[:10],
+            str(session.profile_id),
+            session.depth,
+            session.status,
+            ", ".join(session.completed_modules) or "-",
+            ", ".join(session.pending_setup_modules) or "-",
+            session.resume_token,
+        )
+    return table
+
+
+def config_sections_table() -> Table:
+    table = Table(title="CleanTrace Configuration Guide", box=box.SIMPLE_HEAVY)
+    table.add_column("Section", style="bold")
+    table.add_column("Purpose")
+    table.add_column("Required")
+    table.add_column("Privacy")
+    table.add_column("Setting")
+    table.add_column("Current")
+    for section in config_sections():
+        key = str(section["setting"])
+        table.add_row(
+            str(section["name"]),
+            str(section["purpose"]),
+            str(section["required"]),
+            str(section["privacy"]),
+            key,
+            str(config_get(key, "see local file")),
+        )
+    return table
+
+
+def select_or_create_profile(
+    session: Session,
+    crypto: CryptoBox,
+    profile_slug: str | None,
+) -> Profile:
+    if profile_slug:
+        return _require_profile(session, profile_slug)
+    profiles = list(session.exec(select(Profile)).all())
+    if profiles:
+        choices = [profile.slug for profile in profiles]
+        slug = Prompt.ask("Profile", choices=choices, default=choices[0])
+        return _require_profile(session, slug)
+    console.print("[yellow]No consent profile exists yet. Let's create one.[/yellow]")
+    slug = Prompt.ask("Profile slug", default="default")
+    username = Prompt.ask("Usernames (comma-separated)", default="")
+    email = Prompt.ask("Emails (comma-separated)", default="")
+    consent = Confirm.ask(
+        "Do you confirm this profile is yours or clearly consented?",
+        default=True,
+    )
+    if not consent:
+        raise typer.BadParameter("CleanTrace requires an explicit consent profile.")
+    profile = create_profile(
+        session,
+        crypto,
+        slug=slug,
+        legal_name=Prompt.ask("Legal name (optional)", default="") or None,
+        display_names=[],
+        usernames=_split_csv([username]),
+        emails=_split_csv([email]),
+        phones=[],
+        location=Prompt.ask("Approximate location (optional)", default="") or None,
+        domains=[],
+        social_links=[],
+        role_notes=None,
+        risk_sensitivity="normal",
+        consent=True,
+    )
+    return profile
+
+
+def choose_scan_modules(advanced: bool) -> list[str]:
+    if Confirm.ask("Run a full broad exposure scan?", default=not advanced):
+        return ["username", "social", "phone", "web", "brokers", "intel", "github"]
+    options = [
+        ("username", "usernames and social profiles"),
+        ("social", "expanded social/profile sites"),
+        ("email", "email exposure"),
+        ("phone", "phone exposure"),
+        ("web", "public web exposure"),
+        ("brokers", "data brokers and people-search sites"),
+        ("intel", "breach intelligence"),
+        ("github", "linked GitHub exposure"),
+        ("takeout", "Google Takeout exposure"),
+        ("tor", "Tor public URL checks"),
+    ]
+    selected: list[str] = []
+    for key, label in options:
+        if Confirm.ask(f"Include {label}?", default=key in {"username", "social", "brokers"}):
+            selected.append(key)
+    return selected or ["username"]
+
+
+def handle_missing_config(readiness: list[ModuleReadiness]) -> list[str]:
+    selected: list[str] = []
+    for item in readiness:
+        if item.ready or item.dependency.can_run_without_config:
+            selected.append(item.dependency.name)
+            continue
+        console.print(f"\n[yellow]{item.dependency.label} is not ready.[/yellow]")
+        console.print(item.dependency.setup_instructions or item.reason)
+        action = Prompt.ask(
+            "Action",
+            choices=["configure", "skip", "fallback", "exit"],
+            default="skip",
+        )
+        if action == "exit":
+            raise typer.Exit(1)
+        if action == "skip":
+            continue
+        if action == "fallback":
+            selected.append(item.dependency.name)
+            continue
+        configure_module(item.dependency.name)
+        if readiness_for([item.dependency.name])[0].ready:
+            selected.append(item.dependency.name)
+    return selected
+
+
+def configure_module(module: str) -> None:
+    if module == "web":
+        console.print(
+            "Public web discovery needs a search provider. Recommended local option: "
+            "SearXNG. Recommended API option: Brave Search."
+        )
+        provider = Prompt.ask(
+            "Provider",
+            choices=["searxng", "brave", "bing", "google_cse", "serpapi", "skip"],
+            default="searxng",
+        )
+        if provider == "skip":
+            return
+        config_set("web_discovery.enabled", "true")
+        config_set("web_discovery.default_provider", provider)
+        config_set(f"web_discovery.providers.{provider}.enabled", "true")
+        if provider == "searxng":
+            base_url = Prompt.ask("SearXNG base URL", default="http://localhost:8080")
+            config_set("web_discovery.providers.searxng.base_url", base_url)
+        else:
+            key = Prompt.ask(f"{provider} API key", password=True)
+            config_set(f"web_discovery.providers.{provider}.api_key", key)
+            if provider == "google_cse":
+                cx = Prompt.ask("Google Custom Search engine ID")
+                config_set("web_discovery.providers.google_cse.search_engine_id", cx)
+        set_plugin_enabled("web_discovery", True)
+    elif module == "intel":
+        config_set("breach_intel.enabled", "true")
+        config_set("breach_intel.providers.hibp.enabled", "true")
+        key = Prompt.ask("HIBP API key", password=True)
+        config_set("breach_intel.providers.hibp.api_key", key)
+        config_set("api_keys.hibp", key)
+        set_plugin_enabled("breach_intel", True)
+        set_plugin_enabled("hibp_email", True)
+    elif module == "tor":
+        config_set("tor_public_check.enabled", "true")
+        proxy = Prompt.ask("Tor SOCKS proxy", default="socks5://127.0.0.1:9050")
+        config_set("tor_public_check.socks_proxy", proxy)
+        set_plugin_enabled("tor_public_check", True)
 
 
 @app.callback()
@@ -485,6 +807,10 @@ def scan_all_command(
                             )
                         )
                     )
+        with console.status("Checking expanded social/profile sites...", spinner="dots"):
+            new_findings.extend(
+                asyncio.run(scan_social(session, crypto, profile=profile, depth=depth))
+            )
         new_findings.extend(scan_phone_profile(session, crypto, profile=profile))
         with console.status("Running enabled public web discovery...", spinner="dots"):
             new_findings.extend(
@@ -501,6 +827,10 @@ def scan_all_command(
         with console.status("Checking enabled breach intelligence providers...", spinner="dots"):
             new_findings.extend(
                 asyncio.run(scan_intel(session, crypto, profile=profile, depth=depth))
+            )
+        with console.status("Building data broker guidance...", spinner="dots"):
+            new_findings.extend(
+                asyncio.run(scan_brokers(session, crypto, profile=profile, depth=depth))
             )
         with console.status("Checking linked GitHub accounts...", spinner="dots"):
             new_findings.extend(
@@ -849,6 +1179,7 @@ def scan_exposure_command(
             new_findings.extend(
                 asyncio.run(scan_username(session, profile=profile, username=username, depth=depth))
             )
+        new_findings.extend(asyncio.run(scan_social(session, crypto, profile=profile, depth=depth)))
         new_findings.extend(scan_phone_profile(session, crypto, profile=profile))
         new_findings.extend(
             asyncio.run(
@@ -862,6 +1193,9 @@ def scan_exposure_command(
             )
         )
         new_findings.extend(asyncio.run(scan_intel(session, crypto, profile=profile, depth=depth)))
+        new_findings.extend(
+            asyncio.run(scan_brokers(session, crypto, profile=profile, depth=depth))
+        )
         new_findings.extend(asyncio.run(scan_github_linked(session, crypto, profile=profile)))
         findings = list_findings(session, profile)
     if json_output:
@@ -881,6 +1215,138 @@ def scan_exposure_command(
     console.print(summary_panel(profile, findings))
     console.print(findings_table(new_findings if new_findings else findings))
     console.print(actions_panel(findings))
+
+
+@scan_app.command("social")
+def scan_social_command(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    depth: Annotated[str, typer.Option("--depth", help="quick, standard, or deep.")] = "quick",
+    username: Annotated[str | None, typer.Option("--username")] = None,
+    category: Annotated[str | None, typer.Option("--category")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Check broad public social/profile sites for profile usernames."""
+    if depth not in {"quick", "standard", "deep"}:
+        raise typer.BadParameter("depth must be quick, standard, or deep.")
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        with console.status("Checking public social/profile sites...", spinner="dots"):
+            new_findings = asyncio.run(
+                scan_social(
+                    session,
+                    crypto,
+                    profile=profile,
+                    depth=depth,
+                    username=username,
+                    category=category,
+                )
+            )
+        findings = list_findings(session, profile)
+    if json_output:
+        console.print_json(
+            json.dumps([finding.model_dump(mode="json") for finding in new_findings], default=str)
+        )
+        return
+    console.print(summary_panel(profile, findings))
+    console.print(findings_table(new_findings if new_findings else findings))
+    console.print(actions_panel(findings))
+
+
+@scan_app.command("brokers")
+def scan_brokers_command(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    country: Annotated[str | None, typer.Option("--country")] = None,
+    depth: Annotated[str, typer.Option("--depth", help="quick, standard, or deep.")] = "quick",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Check data broker/people-search sources or generate manual guidance."""
+    if depth not in {"quick", "standard", "deep"}:
+        raise typer.BadParameter("depth must be quick, standard, or deep.")
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        with console.status("Building broker and people-search coverage...", spinner="dots"):
+            new_findings = asyncio.run(
+                scan_brokers(session, crypto, profile=profile, country=country, depth=depth)
+            )
+        findings = list_findings(session, profile)
+    if json_output:
+        console.print_json(
+            json.dumps([finding.model_dump(mode="json") for finding in new_findings], default=str)
+        )
+        return
+    console.print(summary_panel(profile, findings))
+    console.print(findings_table(new_findings if new_findings else findings))
+    console.print(actions_panel(findings))
+
+
+@scan_app.command("wizard")
+def scan_wizard_command(
+    profile_slug: Annotated[str | None, typer.Option("--profile", "-p")] = None,
+    resume: Annotated[bool, typer.Option("--resume")] = False,
+    advanced: Annotated[bool, typer.Option("--advanced")] = False,
+) -> None:
+    """Guided scan wizard with config readiness and resume support."""
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        if resume:
+            saved = latest_resumable_session()
+            if not saved:
+                console.print("[yellow]No active scan session to resume.[/yellow]")
+                return
+            profile = _profile_for_session(session, saved)
+            modules = [
+                module
+                for module in saved.requested_modules
+                if module not in saved.completed_modules and module not in saved.skipped_modules
+            ]
+            console.print(f"[green]Resuming scan session[/green] {saved.scan_session_id[:10]}")
+            new_findings = _run_scan_modules(session, crypto, profile, saved, modules)
+            findings = list_findings(session, profile)
+            console.print(summary_panel(profile, findings))
+            console.print(findings_table(new_findings if new_findings else findings))
+            console.print(actions_panel(findings))
+            return
+        profile = select_or_create_profile(session, crypto, profile_slug)
+        depth = Prompt.ask("Scan depth", choices=["quick", "standard", "deep"], default="quick")
+        modules = choose_scan_modules(advanced)
+        readiness = readiness_for(modules)
+        console.print(readiness_table(readiness))
+        modules = handle_missing_config(readiness)
+        if profile.id is None:
+            raise typer.BadParameter("Profile must be saved before scanning.")
+        scan_session = create_session(profile.id, modules, depth)
+        new_findings = _run_scan_modules(session, crypto, profile, scan_session, modules)
+        findings = list_findings(session, profile)
+    console.print(summary_panel(profile, findings))
+    console.print(findings_table(new_findings if new_findings else findings))
+    console.print(actions_panel(findings))
+    console.print(f"[dim]Scan session: {scan_session.scan_session_id[:10]}[/dim]")
+
+
+@scan_app.command("resume")
+def scan_resume_command() -> None:
+    """Resume the latest active guided scan session."""
+    scan_wizard_command(resume=True)
+
+
+@scan_app.command("sessions")
+def scan_sessions_command() -> None:
+    """List local guided scan sessions."""
+    console.print(session_table(load_sessions()))
+
+
+@scan_app.command("cancel")
+def scan_cancel_command(session_id: Annotated[str, typer.Argument()]) -> None:
+    """Cancel a local guided scan session."""
+    if cancel_session(session_id):
+        console.print(f"[green]Cancelled scan session[/green] {session_id}")
+    else:
+        raise typer.BadParameter("Scan session not found.")
 
 
 @scan_app.command("password")
@@ -994,6 +1460,32 @@ def config_command(
     value: Annotated[str | None, typer.Argument(help="Config value.")] = None,
 ) -> None:
     """Show config paths or set a simple local configuration value."""
+    if action == "wizard":
+        console.print(config_sections_table())
+        for module in ["web", "intel", "tor"]:
+            if not readiness_for([module])[0].ready and Confirm.ask(
+                f"Configure {MODULE_DEPENDENCIES[module].label} now?",
+                default=False,
+            ):
+                configure_module(module)
+        console.print("[green]Config wizard complete.[/green]")
+        return
+    if action == "check":
+        modules = ["username", "social", "phone", "web", "brokers", "intel", "github", "tor"]
+        console.print(readiness_table(readiness_for(modules)))
+        return
+    if action == "explain":
+        console.print(config_sections_table())
+        return
+    if action == "providers":
+        console.print(readiness_table(readiness_for(["web", "intel", "github", "tor"])))
+        return
+    if action == "repair":
+        write_default_config(force=False)
+        for plugin in ["social_profiles", "data_brokers"]:
+            set_plugin_enabled(plugin, True)
+        console.print("[green]Config checked. Missing defaults were created if needed.[/green]")
+        return
     if action == "set":
         if not key or value is None:
             raise typer.BadParameter("Usage: cleantrace config set <key> <value>")
@@ -1049,6 +1541,8 @@ def plugins_enable(name: Annotated[str, typer.Argument()]) -> None:
         raise typer.BadParameter(str(exc)) from exc
     if name in {"web_discovery", "breach_intel", "tor_public_check"}:
         config_set(f"{name}.enabled", "true")
+    if name in {"social_profiles", "data_brokers"}:
+        config_set(f"{name}.enabled", "true")
     console.print(f"[green]Enabled plugin[/green] {name}")
 
 
@@ -1061,7 +1555,73 @@ def plugins_disable(name: Annotated[str, typer.Argument()]) -> None:
         raise typer.BadParameter(str(exc)) from exc
     if name in {"web_discovery", "breach_intel", "tor_public_check"}:
         config_set(f"{name}.enabled", "false")
+    if name in {"social_profiles", "data_brokers"}:
+        config_set(f"{name}.enabled", "false")
     console.print(f"[green]Disabled plugin[/green] {name}")
+
+
+@brokers_app.command("list")
+def brokers_list(
+    country: Annotated[str | None, typer.Option("--country")] = None,
+) -> None:
+    """List known data broker and people-search sources."""
+    table = Table(title="Data Broker Sources", box=box.SIMPLE_HEAVY)
+    table.add_column("Name", style="bold")
+    table.add_column("Country")
+    table.add_column("Category")
+    table.add_column("Risk")
+    table.add_column("Manual")
+    table.add_column("Opt-out")
+    for broker in load_brokers():
+        if country and broker.country.upper() not in {country.upper(), "GLOBAL"}:
+            continue
+        table.add_row(
+            broker.name,
+            broker.country,
+            broker.category,
+            broker.risk_level,
+            "yes" if broker.manual_only else "no",
+            broker.opt_out_url,
+        )
+    console.print(table)
+
+
+@brokers_app.command("explain")
+def brokers_explain(name: Annotated[str, typer.Argument()]) -> None:
+    """Explain one broker source and its removal route."""
+    broker = find_broker(name)
+    if not broker:
+        raise typer.BadParameter(f"Unknown broker. Available: {', '.join(broker_names())}")
+    console.print(
+        f"[bold]{broker.name}[/bold]\n"
+        f"Country: {broker.country}\n"
+        f"Category: {broker.category}\n"
+        f"Risk: {broker.risk_level}\n"
+        f"Opt-out: {broker.opt_out_url}\n"
+        f"Required info: {broker.required_evidence or 'varies'}\n"
+        f"Expected response: {broker.expected_response_time or 'varies'}\n"
+        f"Notes: {broker.notes}\n"
+        f"Removal notes: {broker.removal_notes}"
+    )
+
+
+@brokers_app.command("removal-plan")
+def brokers_removal_plan_command(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    country: Annotated[str | None, typer.Option("--country")] = None,
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+) -> None:
+    """Generate a local broker removal plan."""
+    init_db(_engine())
+    crypto = CryptoBox()
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        plan = broker_removal_plan(profile, crypto, country)
+    if output:
+        output.write_text(plan, encoding="utf-8")
+        console.print(f"[green]Broker removal plan written:[/green] {output.resolve()}")
+    else:
+        console.print(plan)
 
 
 @removal_app.command("generate")
@@ -1137,6 +1697,89 @@ def removal_track(
             raise typer.BadParameter("Removal request not found.")
         updated = update_removal_status(session, request, status)
         console.print(f"[green]Updated[/green] {updated.id[:10]} -> {updated.status}")
+
+
+@removal_app.command("mark")
+def removal_mark(
+    finding: Annotated[str, typer.Option("--finding")],
+    status: Annotated[str, typer.Option("--status")] = "submitted",
+) -> None:
+    """Mark the removal status for a finding-linked request."""
+    removal_track(finding=finding, status=status)
+
+
+@removal_app.command("plan")
+def removal_plan(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    country: Annotated[str | None, typer.Option("--country")] = None,
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+) -> None:
+    """Generate a broker and finding cleanup plan."""
+    brokers_removal_plan_command(profile_slug=profile_slug, country=country, output=output)
+
+
+@removal_app.command("wizard")
+def removal_wizard(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+) -> None:
+    """Walk through high-priority findings and draft removal requests."""
+    init_db(_engine())
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        findings = sorted(
+            list_findings(session, profile),
+            key=lambda finding: (finding.severity, finding.confidence),
+            reverse=True,
+        )
+    if not findings:
+        console.print("[yellow]No findings yet. Run a scan first.[/yellow]")
+        return
+    for finding in findings[:10]:
+        console.print(f"\n[bold]{finding.id[:10]}[/bold] {finding.title}")
+        console.print(f"Severity: {finding.severity}; confidence: {finding.confidence}%")
+        if Confirm.ask("Generate removal request for this finding?", default=False):
+            removal_generate(profile_slug=profile_slug, finding=finding.id)
+
+
+@removal_app.command("evidence")
+def removal_evidence(
+    finding: Annotated[str, typer.Option("--finding")],
+    file: Annotated[Path, typer.Option("--file")],
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+) -> None:
+    """Attach local evidence metadata to a finding/removal workflow."""
+    import_evidence(
+        path=file,
+        profile_slug=profile_slug,
+        status="removal requested",
+        attach_finding=finding,
+    )
+
+
+@removal_app.command("followup")
+def removal_followup(
+    finding: Annotated[str, typer.Option("--finding")],
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+) -> None:
+    """Generate a local follow-up reminder and optional ICS file."""
+    init_db(_engine())
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        stored_finding = get_finding(session, finding)
+        if not stored_finding or stored_finding.profile_id != profile.id:
+            raise typer.BadParameter("Finding not found for this profile.")
+    text = (
+        "Follow up on CleanTrace removal request\n"
+        f"Finding: {stored_finding.id}\n"
+        f"Subject: {stored_finding.title}\n"
+        "Ask whether the removal, suppression, or correction request has been completed."
+    )
+    if output:
+        output.write_text(text, encoding="utf-8")
+        console.print(f"[green]Follow-up reminder written:[/green] {output.resolve()}")
+    else:
+        console.print(text)
 
 
 @removal_app.command("list")
@@ -1335,6 +1978,69 @@ def tui_command() -> None:
     run_tui()
 
 
+@monitor_app.command("enable")
+def monitor_enable(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+) -> None:
+    """Enable local monitoring for a profile."""
+    config_set("monitoring.enabled", "true")
+    config_set("monitoring.profile", profile_slug)
+    console.print(
+        "[green]Monitoring enabled locally.[/green]\n"
+        "Use cron, Windows Task Scheduler, or systemd user timers to run "
+        "`cleantrace monitor run` on your schedule."
+    )
+
+
+@monitor_app.command("disable")
+def monitor_disable() -> None:
+    """Disable local monitoring."""
+    config_set("monitoring.enabled", "false")
+    console.print("[green]Monitoring disabled.[/green]")
+
+
+@monitor_app.command("run")
+def monitor_run() -> None:
+    """Run local monitoring diff against current stored findings."""
+    profile_slug = str(config_get("monitoring.profile", "default") or "default")
+    init_db(_engine())
+    with Session(_engine()) as session:
+        profile = _require_profile(session, profile_slug)
+        findings = list_findings(session, profile)
+    diff = update_monitor_snapshot(profile_slug, findings)
+    changed = [finding for finding in findings if finding.id in set(diff.new + diff.changed)]
+    summary = alert_summary(changed)
+    console.print(
+        f"New: {len(diff.new)} | Removed: {len(diff.removed)} | "
+        f"Changed: {len(diff.changed)} | Reappeared: {len(diff.reappeared)}"
+    )
+    if summary:
+        console.print(summary)
+
+
+@monitor_app.command("status")
+def monitor_status() -> None:
+    """Show local monitoring status."""
+    console.print_json(
+        json.dumps(
+            {
+                "enabled": config_get("monitoring.enabled", False),
+                "profile": config_get("monitoring.profile", ""),
+                "state": load_monitor_state(),
+            },
+            default=str,
+        )
+    )
+
+
+@monitor_app.command("changes")
+def monitor_changes() -> None:
+    """Show last local monitoring change summary."""
+    state = load_monitor_state()
+    profiles = state.get("profiles", {}) if isinstance(state, dict) else {}
+    console.print_json(json.dumps(profiles, default=str))
+
+
 async def _run_ai_command(
     profile_slug: str,
     kind: str,
@@ -1398,6 +2104,48 @@ def ai_removal_email(
     except AIUnavailableError as exc:
         raise typer.BadParameter(str(exc)) from exc
     console.print(response)
+
+
+@ai_app.command("explain-finding")
+def ai_explain_finding(
+    finding_id: Annotated[str, typer.Argument()],
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    model: Annotated[str | None, typer.Option("--model")] = None,
+) -> None:
+    """Explain one finding with optional local AI."""
+    try:
+        response = asyncio.run(_run_ai_command(profile_slug, "summarise", finding_id, model))
+    except AIUnavailableError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print(response)
+
+
+@ai_app.command("cleanup-plan")
+def ai_cleanup_plan(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    model: Annotated[str | None, typer.Option("--model")] = None,
+) -> None:
+    """Suggest a cleanup plan with optional local AI."""
+    ai_actions(profile_slug=profile_slug, model=model)
+
+
+@ai_app.command("removal-draft")
+def ai_removal_draft(
+    finding: Annotated[str, typer.Option("--finding")],
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    model: Annotated[str | None, typer.Option("--model")] = None,
+) -> None:
+    """Draft a removal message with optional local AI."""
+    ai_removal_email(profile_slug=profile_slug, finding=finding, model=model)
+
+
+@ai_app.command("summarise-report")
+def ai_summarise_report(
+    profile_slug: Annotated[str, typer.Option("--profile", "-p")] = "default",
+    model: Annotated[str | None, typer.Option("--model")] = None,
+) -> None:
+    """Summarise report context with optional local AI."""
+    ai_summarise(profile_slug=profile_slug, model=model)
 
 
 @app.command("wipe")

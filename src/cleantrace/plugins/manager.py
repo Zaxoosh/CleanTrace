@@ -68,6 +68,28 @@ def built_in_plugin_metadata() -> list[PluginMeta]:
             rate_limit_per_minute=60,
             tags=["manual", "metadata-only"],
         ),
+        PluginMeta(
+            name="social_profiles",
+            description="Checks broad public social/profile-site registries for usernames.",
+            input_types=["username", "social_profile"],
+            risk_level="safe",
+            needs_api_key=False,
+            uses_scraping=False,
+            enabled_by_default=True,
+            rate_limit_per_minute=30,
+            tags=["social", "profile-sites"],
+        ),
+        PluginMeta(
+            name="data_brokers",
+            description="Creates broker and people-search checks, guidance, and removal leads.",
+            input_types=["broker_guidance", "name", "phone", "email"],
+            risk_level="safe",
+            needs_api_key=False,
+            uses_scraping=False,
+            enabled_by_default=True,
+            rate_limit_per_minute=30,
+            tags=["data-broker", "people-search"],
+        ),
     ]
 
 

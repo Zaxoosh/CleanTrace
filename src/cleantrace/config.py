@@ -19,6 +19,7 @@ user_sites_dir = "{sites}"
 default_depth = "quick"
 redact_output = true
 respect_robots_txt = true
+default_country = "GB"
 
 [web_discovery]
 enabled = false
@@ -93,6 +94,36 @@ timeout_seconds = 20
 store_page_content = false
 redact_output = true
 
+[social_profiles]
+enabled = true
+include_sensitive_sites = false
+request_delay_seconds = 1
+timeout_seconds = 10
+
+[data_brokers]
+enabled = true
+default_country = "GB"
+request_delay_seconds = 1
+manual_guidance_when_unconfigured = true
+
+[reports]
+default_format = "html"
+include_identity_graph = true
+
+[monitoring]
+enabled = false
+profile = ""
+depth = "quick"
+last_run = ""
+
+[alerts]
+enabled = false
+desktop = false
+smtp = false
+webhook = false
+discord_webhook = false
+include_sensitive_in_alerts = false
+
 [ai]
 provider = "none"
 ollama_url = "http://localhost:11434"
@@ -110,6 +141,7 @@ class AppConfig:
     database: Path
     user_sites_dir: Path
     default_depth: str = "quick"
+    default_country: str = "GB"
     redact_output: bool = True
     ai_provider: str = "none"
     ollama_url: str = "http://localhost:11434"
@@ -146,6 +178,7 @@ def load_config() -> AppConfig:
         database=Path(storage.get("database") or database_path()),
         user_sites_dir=Path(storage.get("user_sites_dir") or sites_dir()),
         default_depth=str(scan.get("default_depth") or "quick"),
+        default_country=str(scan.get("default_country") or "GB"),
         redact_output=bool(scan.get("redact_output", True)),
         ai_provider=str(ai.get("provider") or "none"),
         ollama_url=str(ai.get("ollama_url") or "http://localhost:11434"),

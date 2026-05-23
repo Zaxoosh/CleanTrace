@@ -10,12 +10,17 @@ from cleantrace.models import Finding, Profile
 
 REMOVAL_STATUSES = {
     "not started",
+    "not_started",
     "drafted",
     "sent",
+    "submitted",
     "waiting",
     "removed",
     "refused",
     "needs manual action",
+    "needs_manual_action",
+    "reappeared",
+    "followup_due",
 }
 
 
@@ -25,15 +30,25 @@ class Broker:
     country: str
     opt_out_url: str
     category: str = "data broker"
+    region: str = ""
+    homepage_url: str = ""
+    search_url_template: str = ""
     privacy_url: str | None = None
     email: str | None = None
+    removal_method: str = "manual"
     required_evidence: str = ""
     expected_response_time: str = ""
     supports_gdpr: bool = False
     supports_uk_gdpr: bool = False
+    supports_ccpa: bool = False
+    requires_id_document: bool = False
     manual_only: bool = True
+    enabled_by_default: bool = True
+    check_method: str = "manual_guidance"
+    risk_level: str = "medium"
     notes: str = ""
     risk_notes: str = ""
+    removal_notes: str = ""
 
 
 BROKERS = [
@@ -92,19 +107,29 @@ def load_brokers() -> list[Broker]:
             Broker(
                 name=str(item["name"]),
                 country=str(item.get("country") or ""),
+                region=str(item.get("region") or ""),
                 category=str(item.get("category") or "data broker"),
+                homepage_url=str(item.get("homepage_url") or ""),
+                search_url_template=str(item.get("search_url_template") or ""),
                 opt_out_url=str(item.get("opt_out_url") or ""),
                 privacy_url=str(item.get("privacy_url") or "") or None,
                 email=str(item.get("contact_email") or "") or None,
+                removal_method=str(item.get("removal_method") or "manual"),
                 required_evidence=", ".join(str(v) for v in item.get("required_info", []))
                 if isinstance(item.get("required_info"), list)
                 else str(item.get("required_info") or ""),
                 expected_response_time=f"{item.get('expected_response_days', '')} days".strip(),
                 supports_gdpr=bool(item.get("supports_gdpr", False)),
                 supports_uk_gdpr=bool(item.get("supports_uk_gdpr", False)),
+                supports_ccpa=bool(item.get("supports_ccpa", False)),
+                requires_id_document=bool(item.get("requires_id_document", False)),
                 manual_only=bool(item.get("manual_only", True)),
+                enabled_by_default=bool(item.get("enabled_by_default", True)),
+                check_method=str(item.get("check_method") or "manual_guidance"),
+                risk_level=str(item.get("risk_level") or "medium"),
                 notes=str(item.get("notes") or ""),
                 risk_notes=str(item.get("risk_notes") or ""),
+                removal_notes=str(item.get("removal_notes") or ""),
             )
         )
     return brokers or BROKERS

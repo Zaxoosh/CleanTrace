@@ -5,6 +5,7 @@ from html import escape
 from pathlib import Path
 
 from cleantrace.models import Finding, Profile
+from cleantrace.readiness import readiness_for
 from cleantrace.scoring import exposure_score, score_band, top_actions
 
 REPORT_SECTIONS = [
@@ -13,7 +14,8 @@ REPORT_SECTIONS = [
     ("Breach & Dark Web Intelligence", {"breach_intel", "hibp_email"}),
     ("Tor Public URL Check", {"tor_public_check"}),
     ("Manual Evidence", {"manual_evidence"}),
-    ("Data Broker Opportunities", {"data_broker"}),
+    ("Social Profile Findings", {"social_profiles", "social-profile"}),
+    ("Data Broker Opportunities", {"data_broker", "data_brokers"}),
 ]
 
 
@@ -33,9 +35,53 @@ def render_markdown(profile: Profile, findings: list[Finding]) -> str:
         "- Findings are leads for review. This is a lead, not proof.",
         "- Removal is not guaranteed. Breach intelligence is metadata-only.",
         "",
-        "## Highest-Risk Exposures",
+        "## Setup Status",
         "",
     ]
+    for item in readiness_for(["username", "social", "web", "brokers", "intel", "github", "tor"]):
+        lines.append(f"- {item.dependency.label}: {'ready' if item.ready else item.reason}")
+    lines.extend(
+        [
+            "",
+            "## Scan Coverage",
+            "",
+            "- Sources checked are shown through source/plugin labels and provider metadata.",
+            "- Sources skipped are usually disabled, unconfigured, or manual-only.",
+            "- CleanTrace does not bypass CAPTCHA, login walls, anti-bot controls, or paywalls.",
+            "",
+            "## Identity-Link Graph",
+            "",
+        ]
+    )
+    graph_rows = identity_link_rows(findings)
+    if graph_rows:
+        lines.append("| From | Link | To | Source |")
+        lines.append("| --- | --- | --- | --- |")
+        lines.extend(graph_rows)
+    else:
+        lines.append("No identity links recorded yet.")
+    lines.extend(
+        [
+            "",
+            "## Exposure Timeline",
+            "",
+            "| First seen | Last seen | Severity | Title |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for finding in sorted(findings, key=lambda item: item.last_seen, reverse=True)[:25]:
+        safe_title = finding.title.replace("|", "\\|")
+        lines.append(
+            f"| {finding.first_seen.date()} | {finding.last_seen.date()} | "
+            f"{finding.severity} | {safe_title} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Highest-Risk Exposures",
+            "",
+        ]
+    )
     ranked = sorted(findings, key=lambda f: (f.severity, f.confidence), reverse=True)
     if not ranked:
         lines.append("No findings recorded yet.")
@@ -153,6 +199,33 @@ def render_markdown(profile: Profile, findings: list[Finding]) -> str:
         ]
     )
     return "\n".join(lines) + "\n"
+
+
+def identity_link_rows(findings: list[Finding]) -> list[str]:
+    rows: list[str] = []
+    for finding in findings:
+        evidence = finding.evidence
+        if evidence.get("identity_linking_risk") or "identity-link" in finding.tags:
+            left = str(evidence.get("username") or evidence.get("broker") or finding.input_type)
+            right = str(
+                evidence.get("site")
+                or evidence.get("category")
+                or finding.url
+                or "public source"
+            )
+            rows.append(
+                "| "
+                + " | ".join(
+                    [
+                        left.replace("|", "\\|"),
+                        "links to",
+                        right.replace("|", "\\|"),
+                        finding.source_plugin,
+                    ]
+                )
+                + " |"
+            )
+    return rows[:30]
 
 
 def render_finding_block(finding: Finding) -> list[str]:

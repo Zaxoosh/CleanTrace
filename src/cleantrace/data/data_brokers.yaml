@@ -1,76 +1,506 @@
 - name: 192.com
-  country: UK
-  category: people-search
+  country: GB
+  region: UK
+  category: people_search
+  homepage_url: https://www.192.com
+  search_url_template: https://www.192.com/people/search/
   opt_out_url: https://www.192.com/misc/privacy-policy/
   privacy_url: https://www.192.com/misc/privacy-policy/
   contact_email: privacy@192.com
-  required_info:
-    - listing URL
-    - name
-    - address details shown on listing
-  expected_response_days: 30
+  removal_method: email_or_form
   supports_gdpr: true
   supports_uk_gdpr: true
+  supports_ccpa: false
+  requires_id_document: false
+  required_info: [listing URL, name, address details shown on listing]
+  expected_response_days: 30
   manual_only: true
-  notes: Manual opt-out or privacy request. Do not automate form submissions.
-  risk_notes: Can link real name to home address or phone details.
+  enabled_by_default: true
+  check_method: search_provider_query
+  risk_level: high
+  notes: UK people-search and directory listing source.
+  risk_notes: Can link real name to home address and phone.
+  removal_notes: Request suppression and ask for minimum verification only.
 - name: Open Electoral Register
-  country: UK
-  category: public-register-guidance
+  country: GB
+  region: UK
+  category: electoral_register
+  homepage_url: https://www.gov.uk/electoral-register
+  search_url_template: ""
   opt_out_url: https://www.gov.uk/electoral-register/opt-out-of-the-open-register
   privacy_url: https://www.gov.uk/electoral-register
   contact_email: ""
-  required_info:
-    - local council electoral registration contact
-  expected_response_days: 30
+  removal_method: local_council_request
   supports_gdpr: false
   supports_uk_gdpr: false
+  supports_ccpa: false
+  requires_id_document: false
+  required_info: [local council electoral registration contact]
+  expected_response_days: 30
   manual_only: true
-  notes: Guidance for opting out of the open register through the local council.
-  risk_notes: Open-register listings can be reused by people-search services.
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: high
+  notes: Opt out through your local council.
+  risk_notes: Open-register data can be reused by people-search sites.
+  removal_notes: Ask your council to remove you from the open register.
 - name: Companies House
-  country: UK
-  category: public-register-guidance
+  country: GB
+  region: UK
+  category: company_register
+  homepage_url: https://find-and-update.company-information.service.gov.uk/
+  search_url_template: https://find-and-update.company-information.service.gov.uk/search?q={query}
   opt_out_url: https://www.gov.uk/guidance/applying-to-protect-your-personal-information-on-the-companies-house-register
   privacy_url: https://www.gov.uk/government/organisations/companies-house/about/personal-information-charter
   contact_email: ""
-  required_info:
-    - company number
-    - officer name
-    - evidence for protected information request where required
-  expected_response_days: 30
+  removal_method: statutory_suppression_request
   supports_gdpr: false
   supports_uk_gdpr: true
+  supports_ccpa: false
+  requires_id_document: true
+  required_info: [company number, officer name, protected information evidence where required]
+  expected_response_days: 30
   manual_only: true
-  notes: Public register data has statutory retention limits; suppression is not guaranteed.
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: high
+  notes: Public register data has statutory limits; suppression is not guaranteed.
   risk_notes: Can expose service addresses, roles, and historical appointments.
+  removal_notes: Review Companies House guidance before sending documents.
 - name: Google Outdated Content
   country: Global
-  category: search-engine-removal
+  region: Global
+  category: search_engine
+  homepage_url: https://www.google.com
+  search_url_template: ""
   opt_out_url: https://search.google.com/search-console/remove-outdated-content
   privacy_url: https://policies.google.com/privacy
   contact_email: ""
-  required_info:
-    - URL
-    - proof content was removed or changed at source
-  expected_response_days: 14
+  removal_method: outdated_content_tool
   supports_gdpr: false
   supports_uk_gdpr: false
+  supports_ccpa: false
+  requires_id_document: false
+  required_info: [URL, proof source content changed or was removed]
+  expected_response_days: 14
   manual_only: true
-  notes: Use after content has been removed or changed at the source.
-  risk_notes: Search snippets can keep old identifiers visible after source cleanup.
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: medium
+  notes: Use after content has changed at source.
+  risk_notes: Snippets can preserve old identifiers.
+  removal_notes: Remove at source first, then request cache/snippet refresh.
 - name: Bing Content Removal
   country: Global
-  category: search-engine-removal
+  region: Global
+  category: search_engine
+  homepage_url: https://www.bing.com
+  search_url_template: ""
   opt_out_url: https://www.bing.com/webmasters/tools/contentremoval
   privacy_url: https://privacy.microsoft.com/privacystatement
   contact_email: ""
-  required_info:
-    - URL
-    - removed or changed source content
-  expected_response_days: 14
+  removal_method: outdated_content_tool
   supports_gdpr: false
   supports_uk_gdpr: false
+  supports_ccpa: false
+  requires_id_document: false
+  required_info: [URL, removed or changed source content]
+  expected_response_days: 14
   manual_only: true
-  notes: Use for stale Bing cached results after source cleanup.
-  risk_notes: Search result caches can extend exposure duration.
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: medium
+  notes: Use for stale Bing cached results.
+  risk_notes: Search result caches can extend exposure.
+  removal_notes: Remove at source first.
+- name: Whitepages
+  country: US
+  region: US
+  category: people_search
+  homepage_url: https://www.whitepages.com
+  search_url_template: https://www.whitepages.com/name/{query}
+  opt_out_url: https://www.whitepages.com/suppression_requests
+  privacy_url: https://www.whitepages.com/privacy
+  contact_email: ""
+  removal_method: form
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [listing URL, verification email]
+  expected_response_days: 14
+  manual_only: true
+  enabled_by_default: true
+  check_method: search_provider_query
+  risk_level: high
+  notes: Do not bypass CAPTCHA or verification flows.
+  risk_notes: Can expose address, relatives, and phone.
+  removal_notes: Use the official suppression request.
+- name: Spokeo
+  country: US
+  region: US
+  category: data_broker
+  homepage_url: https://www.spokeo.com
+  search_url_template: https://www.spokeo.com/{query}
+  opt_out_url: https://www.spokeo.com/optout
+  privacy_url: https://www.spokeo.com/privacy
+  contact_email: ""
+  removal_method: form
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [profile URL, email verification]
+  expected_response_days: 7
+  manual_only: true
+  enabled_by_default: true
+  check_method: search_provider_query
+  risk_level: high
+  notes: Manual opt-out only.
+  risk_notes: Can aggregate addresses and family links.
+  removal_notes: Track confirmation email.
+- name: BeenVerified
+  country: US
+  region: US
+  category: people_search
+  homepage_url: https://www.beenverified.com
+  search_url_template: ""
+  opt_out_url: https://www.beenverified.com/app/optout/search
+  privacy_url: https://www.beenverified.com/privacy
+  contact_email: privacy@beenverified.com
+  removal_method: form
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [listing URL, email verification]
+  expected_response_days: 7
+  manual_only: true
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: high
+  notes: Uses opt-out workflow.
+  risk_notes: Can expose address, phone, relatives.
+  removal_notes: Do not submit more information than required.
+- name: PeopleFinders
+  country: US
+  region: US
+  category: people_search
+  homepage_url: https://www.peoplefinders.com
+  search_url_template: ""
+  opt_out_url: https://www.peoplefinders.com/opt-out
+  privacy_url: https://www.peoplefinders.com/privacy
+  contact_email: ""
+  removal_method: form
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [listing details, verification]
+  expected_response_days: 7
+  manual_only: true
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: high
+  notes: Manual opt-out.
+  risk_notes: Common address and phone aggregator.
+  removal_notes: Save confirmation.
+- name: Intelius
+  country: US
+  region: US
+  category: people_search
+  homepage_url: https://www.intelius.com
+  search_url_template: ""
+  opt_out_url: https://www.intelius.com/opt-out/
+  privacy_url: https://www.intelius.com/privacy-policy/
+  contact_email: ""
+  removal_method: form
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [record details, verification email]
+  expected_response_days: 7
+  manual_only: true
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: high
+  notes: Manual opt-out.
+  risk_notes: People-search aggregator.
+  removal_notes: Track status.
+- name: TruthFinder
+  country: US
+  region: US
+  category: people_search
+  homepage_url: https://www.truthfinder.com
+  search_url_template: ""
+  opt_out_url: https://www.truthfinder.com/opt-out/
+  privacy_url: https://www.truthfinder.com/privacy-policy/
+  contact_email: ""
+  removal_method: form
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [record details, verification]
+  expected_response_days: 7
+  manual_only: true
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: high
+  notes: Manual opt-out.
+  risk_notes: People-search aggregator.
+  removal_notes: Track confirmation.
+- name: FastPeopleSearch
+  country: US
+  region: US
+  category: people_search
+  homepage_url: https://www.fastpeoplesearch.com
+  search_url_template: https://www.fastpeoplesearch.com/name/{query}
+  opt_out_url: https://www.fastpeoplesearch.com/removal
+  privacy_url: https://www.fastpeoplesearch.com/privacy
+  contact_email: ""
+  removal_method: form
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [listing URL, email verification]
+  expected_response_days: 7
+  manual_only: true
+  enabled_by_default: true
+  check_method: search_provider_query
+  risk_level: high
+  notes: Manual browser opt-out; do not bypass CAPTCHA.
+  risk_notes: Can expose address and phone.
+  removal_notes: Verify removal after a few days.
+- name: Radaris
+  country: US
+  region: US
+  category: people_search
+  homepage_url: https://radaris.com
+  search_url_template: ""
+  opt_out_url: https://radaris.com/page/how-to-remove
+  privacy_url: https://radaris.com/privacy
+  contact_email: ""
+  removal_method: form
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [profile URL, verification]
+  expected_response_days: 14
+  manual_only: true
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: high
+  notes: Manual opt-out.
+  risk_notes: Can aggregate identity links.
+  removal_notes: Track confirmation.
+- name: MyLife
+  country: US
+  region: US
+  category: reputation_result
+  homepage_url: https://www.mylife.com
+  search_url_template: ""
+  opt_out_url: https://www.mylife.com/ccpa/index.pubview
+  privacy_url: https://www.mylife.com/privacy-policy/
+  contact_email: privacy@mylife.com
+  removal_method: form_or_email
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [profile URL, identity details]
+  expected_response_days: 30
+  manual_only: true
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: high
+  notes: Reputation-result site; use official privacy process.
+  risk_notes: May link name to location and reputation claims.
+  removal_notes: Keep copies of correspondence.
+- name: PeekYou
+  country: US
+  region: Global
+  category: social_profile_index
+  homepage_url: https://www.peekyou.com
+  search_url_template: ""
+  opt_out_url: https://www.peekyou.com/about/contact/optout/
+  privacy_url: https://www.peekyou.com/about/privacy/
+  contact_email: ""
+  removal_method: form
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [listing URL, matching profile details]
+  expected_response_days: 14
+  manual_only: true
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: medium
+  notes: Indexes profile links.
+  risk_notes: Can connect usernames and profiles.
+  removal_notes: Request suppression of indexed result.
+- name: ZabaSearch
+  country: US
+  region: US
+  category: people_search
+  homepage_url: https://www.zabasearch.com
+  search_url_template: ""
+  opt_out_url: https://www.zabasearch.com/block_records/
+  privacy_url: https://www.zabasearch.com/privacy/
+  contact_email: ""
+  removal_method: form
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [listing details]
+  expected_response_days: 14
+  manual_only: true
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: high
+  notes: Manual opt-out.
+  risk_notes: Address and phone lookup risk.
+  removal_notes: Track confirmation.
+- name: USPhoneBook
+  country: US
+  region: US
+  category: phone_lookup
+  homepage_url: https://www.usphonebook.com
+  search_url_template: ""
+  opt_out_url: https://www.usphonebook.com/opt-out
+  privacy_url: https://www.usphonebook.com/privacy
+  contact_email: ""
+  removal_method: form
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [phone or listing URL, verification]
+  expected_response_days: 7
+  manual_only: true
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: high
+  notes: Manual opt-out.
+  risk_notes: Can link phone to name and address.
+  removal_notes: Verify after removal window.
+- name: ThatsThem
+  country: US
+  region: US
+  category: people_search
+  homepage_url: https://thatsthem.com
+  search_url_template: ""
+  opt_out_url: https://thatsthem.com/optout
+  privacy_url: https://thatsthem.com/privacy-policy
+  contact_email: ""
+  removal_method: form
+  supports_gdpr: false
+  supports_uk_gdpr: false
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [listing URL, matching details]
+  expected_response_days: 7
+  manual_only: true
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: high
+  notes: Manual opt-out.
+  risk_notes: Address, phone, and email inference risk.
+  removal_notes: Track confirmation.
+- name: RocketReach
+  country: Global
+  region: Global
+  category: marketing_database
+  homepage_url: https://rocketreach.co
+  search_url_template: ""
+  opt_out_url: https://rocketreach.co/claim-profile
+  privacy_url: https://rocketreach.co/privacy
+  contact_email: privacy@rocketreach.co
+  removal_method: form_or_email
+  supports_gdpr: true
+  supports_uk_gdpr: true
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [profile URL or business email, verification]
+  expected_response_days: 30
+  manual_only: true
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: medium
+  notes: Business/contact data source.
+  risk_notes: Can expose work email and role links.
+  removal_notes: Ask for removal/suppression.
+- name: Apollo
+  country: Global
+  region: Global
+  category: marketing_database
+  homepage_url: https://www.apollo.io
+  search_url_template: ""
+  opt_out_url: https://www.apollo.io/claim/person/remove/
+  privacy_url: https://www.apollo.io/privacy-policy
+  contact_email: privacy@apollo.io
+  removal_method: form_or_email
+  supports_gdpr: true
+  supports_uk_gdpr: true
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [profile details, email verification]
+  expected_response_days: 30
+  manual_only: true
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: medium
+  notes: B2B contact data.
+  risk_notes: Work role and email exposure.
+  removal_notes: Request suppression.
+- name: ZoomInfo
+  country: Global
+  region: Global
+  category: marketing_database
+  homepage_url: https://www.zoominfo.com
+  search_url_template: ""
+  opt_out_url: https://www.zoominfo.com/privacy-center/update/remove
+  privacy_url: https://www.zoominfo.com/about-zoominfo/privacy-policy
+  contact_email: privacy@zoominfo.com
+  removal_method: form
+  supports_gdpr: true
+  supports_uk_gdpr: true
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [business email, profile details]
+  expected_response_days: 30
+  manual_only: true
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: medium
+  notes: B2B contact database.
+  risk_notes: Work role and contact exposure.
+  removal_notes: Use privacy center.
+- name: Hunter.io
+  country: Global
+  region: Global
+  category: marketing_database
+  homepage_url: https://hunter.io
+  search_url_template: ""
+  opt_out_url: https://hunter.io/claim
+  privacy_url: https://hunter.io/privacy-policy
+  contact_email: privacy@hunter.io
+  removal_method: manual
+  supports_gdpr: true
+  supports_uk_gdpr: true
+  supports_ccpa: true
+  requires_id_document: false
+  required_info: [email address, domain/profile context]
+  expected_response_days: 30
+  manual_only: true
+  enabled_by_default: true
+  check_method: manual_guidance
+  risk_level: medium
+  notes: Manual/company contact exposure check.
+  risk_notes: Can expose work email patterns.
+  removal_notes: Request removal or correction.

@@ -1,0 +1,578 @@
+- name: Facebook
+  category: mainstream_social
+  base_url: https://www.facebook.com
+  profile_url_template: https://www.facebook.com/{username}
+  check_url_template: https://www.facebook.com/{username}
+  username_regex: "^[A-Za-z0-9.]{5,50}$"
+  claimed_indicators: ["facebook", "profile"]
+  unclaimed_indicators: ["content isn't available", "page isn't available"]
+  expected_status_codes: [200]
+  false_positive_rules: ["login to facebook"]
+  rate_limit_seconds: 1
+  requires_javascript: true
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 70 }
+  tags: [social]
+  notes: Public profile endpoint may require manual confirmation.
+  privacy_notes: Facebook may receive the profile URL request.
+- name: Instagram
+  category: image_video
+  base_url: https://www.instagram.com
+  profile_url_template: https://www.instagram.com/{username}/
+  check_url_template: https://www.instagram.com/{username}/
+  username_regex: "^[A-Za-z0-9_.]{1,30}$"
+  claimed_indicators: ["instagram"]
+  unclaimed_indicators: ["sorry, this page isn't available"]
+  expected_status_codes: [200]
+  false_positive_rules: ["log in"]
+  rate_limit_seconds: 1
+  requires_javascript: true
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 70 }
+  tags: [social, image_video]
+  notes: Often needs manual review due JavaScript and anti-abuse controls.
+  privacy_notes: Instagram may receive the profile URL request.
+- name: X/Twitter
+  category: mainstream_social
+  base_url: https://x.com
+  profile_url_template: https://x.com/{username}
+  check_url_template: https://x.com/{username}
+  username_regex: "^[A-Za-z0-9_]{1,15}$"
+  claimed_indicators: ["profile", "twitter", "x.com"]
+  unclaimed_indicators: ["this account doesn’t exist", "this account doesn't exist"]
+  expected_status_codes: [200]
+  false_positive_rules: ["something went wrong"]
+  rate_limit_seconds: 1
+  requires_javascript: true
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 65 }
+  tags: [social]
+  notes: Public profile check only; no login or scraping.
+  privacy_notes: X may receive the profile URL request.
+- name: TikTok
+  category: image_video
+  base_url: https://www.tiktok.com
+  profile_url_template: https://www.tiktok.com/@{username}
+  check_url_template: https://www.tiktok.com/@{username}
+  username_regex: "^[A-Za-z0-9_.]{2,24}$"
+  claimed_indicators: ["tiktok", "@{username}"]
+  unclaimed_indicators: ["couldn't find this account", "not available"]
+  expected_status_codes: [200]
+  false_positive_rules: ["captcha"]
+  rate_limit_seconds: 1
+  requires_javascript: true
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 65 }
+  tags: [social, creator]
+  notes: Requires manual review if anti-bot page appears.
+  privacy_notes: TikTok may receive the profile URL request.
+- name: YouTube
+  category: creator
+  base_url: https://www.youtube.com
+  profile_url_template: https://www.youtube.com/@{username}
+  check_url_template: https://www.youtube.com/@{username}
+  username_regex: "^[A-Za-z0-9_.-]{3,30}$"
+  claimed_indicators: ["youtube", "@{username}"]
+  unclaimed_indicators: ["this page isn't available"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 80 }
+  tags: [video, creator]
+  notes: Public handle page check.
+  privacy_notes: YouTube may receive the profile URL request.
+- name: LinkedIn
+  category: professional
+  base_url: https://www.linkedin.com
+  profile_url_template: https://www.linkedin.com/in/{username}/
+  check_url_template: https://www.linkedin.com/in/{username}/
+  username_regex: "^[A-Za-z0-9-]{3,100}$"
+  claimed_indicators: ["linkedin", "profile"]
+  unclaimed_indicators: ["page not found"]
+  expected_status_codes: [200, 999]
+  false_positive_rules: ["authwall"]
+  rate_limit_seconds: 2
+  requires_javascript: true
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 55 }
+  tags: [professional]
+  notes: LinkedIn commonly blocks automated checks; treat as manual-review lead.
+  privacy_notes: LinkedIn may receive the profile URL request.
+- name: Reddit
+  category: forum
+  base_url: https://www.reddit.com
+  profile_url_template: https://www.reddit.com/user/{username}/
+  check_url_template: https://www.reddit.com/user/{username}/about.json
+  username_regex: "^[A-Za-z0-9_-]{3,20}$"
+  claimed_indicators: ["created_utc", "link_karma"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 88 }
+  tags: [forum, social]
+  notes: Uses a public JSON endpoint.
+  privacy_notes: Reddit may receive the public profile request.
+- name: Pinterest
+  category: image_video
+  base_url: https://www.pinterest.com
+  profile_url_template: https://www.pinterest.com/{username}/
+  check_url_template: https://www.pinterest.com/{username}/
+  username_regex: "^[A-Za-z0-9_]{3,30}$"
+  claimed_indicators: ["pinterest"]
+  unclaimed_indicators: ["couldn't find that page"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: true
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 65 }
+  tags: [image_video]
+  notes: Manual confirmation may be required.
+  privacy_notes: Pinterest may receive the profile URL request.
+- name: Twitch
+  category: creator
+  base_url: https://www.twitch.tv
+  profile_url_template: https://www.twitch.tv/{username}
+  check_url_template: https://www.twitch.tv/{username}
+  username_regex: "^[A-Za-z0-9_]{4,25}$"
+  claimed_indicators: ["twitch"]
+  unclaimed_indicators: ["sorry. unless you’ve got a time machine"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: true
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 60 }
+  tags: [creator, gaming]
+  notes: Public profile page only.
+  privacy_notes: Twitch may receive the profile URL request.
+- name: GitHub
+  category: developer
+  base_url: https://github.com
+  profile_url_template: https://github.com/{username}
+  check_url_template: https://github.com/{username}
+  username_regex: "^[A-Za-z0-9-]{1,39}$"
+  claimed_indicators: ["github", "repositories"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 90 }
+  tags: [developer, professional]
+  notes: Public profile URL check; connector gives richer results.
+  privacy_notes: GitHub may receive the profile URL request.
+- name: GitLab
+  category: developer
+  base_url: https://gitlab.com
+  profile_url_template: https://gitlab.com/{username}
+  check_url_template: https://gitlab.com/{username}
+  username_regex: "^[A-Za-z0-9_.-]{2,255}$"
+  claimed_indicators: ["gitlab"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 85 }
+  tags: [developer]
+  notes: Public profile URL check.
+  privacy_notes: GitLab may receive the profile URL request.
+- name: Bitbucket
+  category: developer
+  base_url: https://bitbucket.org
+  profile_url_template: https://bitbucket.org/{username}/
+  check_url_template: https://bitbucket.org/{username}/
+  username_regex: "^[A-Za-z0-9_-]{3,30}$"
+  claimed_indicators: ["bitbucket"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 80 }
+  tags: [developer]
+  notes: Public profile URL check.
+  privacy_notes: Bitbucket may receive the profile URL request.
+- name: Stack Overflow
+  category: developer
+  base_url: https://stackoverflow.com
+  profile_url_template: https://stackoverflow.com/users/{username}
+  check_url_template: https://stackoverflow.com/users/{username}
+  username_regex: "^[0-9]+$"
+  claimed_indicators: ["stack overflow"]
+  unclaimed_indicators: ["page not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: false
+  confidence_rules: { exact_username_url: 60 }
+  tags: [developer, manual]
+  notes: Stack Overflow URL profile IDs are numeric, so username matching is manual.
+  privacy_notes: Stack Overflow may receive the profile URL request.
+- name: Hacker News
+  category: developer
+  base_url: https://news.ycombinator.com
+  profile_url_template: https://news.ycombinator.com/user?id={username}
+  check_url_template: https://news.ycombinator.com/user?id={username}
+  username_regex: "^[A-Za-z0-9_-]{2,15}$"
+  claimed_indicators: ["user:", "created:"]
+  unclaimed_indicators: ["no such user"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 90 }
+  tags: [developer, forum]
+  notes: Public profile page check.
+  privacy_notes: Hacker News may receive the profile URL request.
+- name: Medium
+  category: creator
+  base_url: https://medium.com
+  profile_url_template: https://medium.com/@{username}
+  check_url_template: https://medium.com/@{username}
+  username_regex: "^[A-Za-z0-9_.-]{2,50}$"
+  claimed_indicators: ["medium"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 80 }
+  tags: [creator]
+  notes: Public profile URL check.
+  privacy_notes: Medium may receive the profile URL request.
+- name: WordPress
+  category: creator
+  base_url: https://profiles.wordpress.org
+  profile_url_template: https://profiles.wordpress.org/{username}/
+  check_url_template: https://profiles.wordpress.org/{username}/
+  username_regex: "^[A-Za-z0-9_-]{2,60}$"
+  claimed_indicators: ["wordpress.org"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 85 }
+  tags: [creator, developer]
+  notes: Public profile URL check.
+  privacy_notes: WordPress may receive the profile URL request.
+- name: Bluesky
+  category: mainstream_social
+  base_url: https://bsky.app
+  profile_url_template: https://bsky.app/profile/{username}
+  check_url_template: https://bsky.app/profile/{username}
+  username_regex: "^[A-Za-z0-9_.-]{3,253}$"
+  claimed_indicators: ["bsky.app", "profile"]
+  unclaimed_indicators: ["user not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: true
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 65 }
+  tags: [social]
+  notes: Public profile URL check.
+  privacy_notes: Bluesky may receive the profile URL request.
+- name: Steam
+  category: gaming
+  base_url: https://steamcommunity.com
+  profile_url_template: https://steamcommunity.com/id/{username}
+  check_url_template: https://steamcommunity.com/id/{username}
+  username_regex: "^[A-Za-z0-9_-]{2,32}$"
+  claimed_indicators: ["steamcommunity", "profile"]
+  unclaimed_indicators: ["the specified profile could not be found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 80 }
+  tags: [gaming]
+  notes: Public custom URL check only.
+  privacy_notes: Steam may receive the profile URL request.
+- name: Roblox
+  category: gaming
+  base_url: https://www.roblox.com
+  profile_url_template: https://www.roblox.com/search/users?keyword={username}
+  check_url_template: https://www.roblox.com/search/users?keyword={username}
+  username_regex: "^[A-Za-z0-9_]{3,20}$"
+  claimed_indicators: ["roblox"]
+  unclaimed_indicators: ["no results"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: true
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 45 }
+  tags: [gaming, manual]
+  notes: Search page lead only; needs manual review.
+  privacy_notes: Roblox may receive the public search request.
+- name: SoundCloud
+  category: music
+  base_url: https://soundcloud.com
+  profile_url_template: https://soundcloud.com/{username}
+  check_url_template: https://soundcloud.com/{username}
+  username_regex: "^[A-Za-z0-9_-]{3,50}$"
+  claimed_indicators: ["soundcloud"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 75 }
+  tags: [music, creator]
+  notes: Public profile URL check.
+  privacy_notes: SoundCloud may receive the profile URL request.
+- name: Bandcamp
+  category: music
+  base_url: https://bandcamp.com
+  profile_url_template: https://{username}.bandcamp.com
+  check_url_template: https://{username}.bandcamp.com
+  username_regex: "^[A-Za-z0-9-]{3,63}$"
+  claimed_indicators: ["bandcamp"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 75 }
+  tags: [music, creator]
+  notes: Public subdomain check.
+  privacy_notes: Bandcamp may receive the profile URL request.
+- name: Letterboxd
+  category: creator
+  base_url: https://letterboxd.com
+  profile_url_template: https://letterboxd.com/{username}/
+  check_url_template: https://letterboxd.com/{username}/
+  username_regex: "^[A-Za-z0-9_]{2,30}$"
+  claimed_indicators: ["letterboxd"]
+  unclaimed_indicators: ["page not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 80 }
+  tags: [creator]
+  notes: Public profile URL check.
+  privacy_notes: Letterboxd may receive the profile URL request.
+- name: Goodreads
+  category: creator
+  base_url: https://www.goodreads.com
+  profile_url_template: https://www.goodreads.com/{username}
+  check_url_template: https://www.goodreads.com/{username}
+  username_regex: "^[A-Za-z0-9_-]{2,50}$"
+  claimed_indicators: ["goodreads"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 70 }
+  tags: [creator]
+  notes: Public profile URL check.
+  privacy_notes: Goodreads may receive the profile URL request.
+- name: Product Hunt
+  category: professional
+  base_url: https://www.producthunt.com
+  profile_url_template: https://www.producthunt.com/@{username}
+  check_url_template: https://www.producthunt.com/@{username}
+  username_regex: "^[A-Za-z0-9_]{2,30}$"
+  claimed_indicators: ["product hunt"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: true
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 65 }
+  tags: [professional]
+  notes: Public profile URL check.
+  privacy_notes: Product Hunt may receive the profile URL request.
+- name: Kaggle
+  category: professional
+  base_url: https://www.kaggle.com
+  profile_url_template: https://www.kaggle.com/{username}
+  check_url_template: https://www.kaggle.com/{username}
+  username_regex: "^[A-Za-z0-9_-]{3,30}$"
+  claimed_indicators: ["kaggle"]
+  unclaimed_indicators: ["404"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: true
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 65 }
+  tags: [professional, developer]
+  notes: Public profile URL check.
+  privacy_notes: Kaggle may receive the profile URL request.
+- name: Replit
+  category: developer
+  base_url: https://replit.com
+  profile_url_template: https://replit.com/@{username}
+  check_url_template: https://replit.com/@{username}
+  username_regex: "^[A-Za-z0-9_-]{2,30}$"
+  claimed_indicators: ["replit"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: true
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 70 }
+  tags: [developer]
+  notes: Public profile URL check.
+  privacy_notes: Replit may receive the profile URL request.
+- name: CodePen
+  category: developer
+  base_url: https://codepen.io
+  profile_url_template: https://codepen.io/{username}
+  check_url_template: https://codepen.io/{username}
+  username_regex: "^[A-Za-z0-9_-]{2,30}$"
+  claimed_indicators: ["codepen"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 80 }
+  tags: [developer]
+  notes: Public profile URL check.
+  privacy_notes: CodePen may receive the profile URL request.
+- name: npm
+  category: developer
+  base_url: https://www.npmjs.com
+  profile_url_template: https://www.npmjs.com/~{username}
+  check_url_template: https://www.npmjs.com/~{username}
+  username_regex: "^[a-z0-9][a-z0-9-~.]*$"
+  claimed_indicators: ["npm"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 80 }
+  tags: [developer]
+  notes: Public profile URL check.
+  privacy_notes: npm may receive the profile URL request.
+- name: PyPI
+  category: developer
+  base_url: https://pypi.org
+  profile_url_template: https://pypi.org/user/{username}/
+  check_url_template: https://pypi.org/user/{username}/
+  username_regex: "^[A-Za-z0-9_.-]{2,50}$"
+  claimed_indicators: ["pypi"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 85 }
+  tags: [developer]
+  notes: Public profile URL check.
+  privacy_notes: PyPI may receive the profile URL request.
+- name: Docker Hub
+  category: developer
+  base_url: https://hub.docker.com
+  profile_url_template: https://hub.docker.com/u/{username}
+  check_url_template: https://hub.docker.com/u/{username}
+  username_regex: "^[a-z0-9][a-z0-9_-]{3,30}$"
+  claimed_indicators: ["docker"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: true
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 60 }
+  tags: [developer]
+  notes: Public profile URL check.
+  privacy_notes: Docker Hub may receive the profile URL request.
+- name: Gravatar
+  category: profile_index
+  base_url: https://gravatar.com
+  profile_url_template: https://gravatar.com/{username}
+  check_url_template: https://gravatar.com/{username}
+  username_regex: "^[A-Za-z0-9_.-]{2,50}$"
+  claimed_indicators: ["gravatar"]
+  unclaimed_indicators: ["not found"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 75 }
+  tags: [profile_index]
+  notes: Public profile URL check.
+  privacy_notes: Gravatar may receive the profile URL request.
+- name: Discord
+  category: messaging
+  base_url: https://discord.com
+  profile_url_template: manual://discord/{username}
+  check_url_template: manual://discord/{username}
+  username_regex: "^[A-Za-z0-9_.]{2,32}$"
+  claimed_indicators: []
+  unclaimed_indicators: []
+  expected_status_codes: [0]
+  false_positive_rules: []
+  rate_limit_seconds: 0
+  requires_javascript: true
+  enabled_by_default: false
+  confidence_rules: { manual_only: 20 }
+  tags: [messaging, manual]
+  notes: Manual/profile-note only. CleanTrace does not scrape Discord servers.
+  privacy_notes: No direct check by default.
+- name: Telegram public usernames
+  category: messaging
+  base_url: https://t.me
+  profile_url_template: https://t.me/{username}
+  check_url_template: https://t.me/{username}
+  username_regex: "^[A-Za-z0-9_]{5,32}$"
+  claimed_indicators: ["telegram"]
+  unclaimed_indicators: ["if you have telegram"]
+  expected_status_codes: [200]
+  false_positive_rules: []
+  rate_limit_seconds: 1
+  requires_javascript: false
+  enabled_by_default: true
+  confidence_rules: { exact_username_url: 70 }
+  tags: [messaging]
+  notes: Public usernames/channels only.
+  privacy_notes: Telegram may receive the public profile request.
+- name: Sensitive optional sites
+  category: sensitive_optional_disabled
+  base_url: manual://sensitive
+  profile_url_template: manual://sensitive/{username}
+  check_url_template: manual://sensitive/{username}
+  username_regex: ".*"
+  claimed_indicators: []
+  unclaimed_indicators: []
+  expected_status_codes: [0]
+  false_positive_rules: []
+  rate_limit_seconds: 0
+  requires_javascript: false
+  enabled_by_default: false
+  confidence_rules: { manual_only: 0 }
+  tags: [sensitive, disabled_by_default]
+  notes: Placeholder category for explicit opt-in only. No NSFW sites are checked by default.
+  privacy_notes: Requires explicit user consent if added locally.

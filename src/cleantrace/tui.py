@@ -9,6 +9,7 @@ from cleantrace.db import get_engine, init_db, list_findings
 from cleantrace.models import Finding, Profile, RemovalRequest
 from cleantrace.plugins.breach_intel.providers import provider_statuses as intel_provider_statuses
 from cleantrace.plugins.web_discovery.providers import provider_statuses as web_provider_statuses
+from cleantrace.readiness import readiness_for
 from cleantrace.scoring import exposure_score, score_band
 from cleantrace.services import list_removal_requests
 
@@ -42,7 +43,9 @@ class CleanTraceTui(App[None]):
                 yield DataTable(id="profiles")
                 yield DataTable(id="removals")
                 yield DataTable(id="providers")
+                yield DataTable(id="setup")
             yield DataTable(id="findings")
+            yield DataTable(id="graph")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -63,6 +66,8 @@ class CleanTraceTui(App[None]):
         self._render_findings(findings)
         self._render_removals(removals)
         self._render_providers()
+        self._render_setup()
+        self._render_graph(findings)
 
     def _render_summary(
         self,
@@ -117,6 +122,24 @@ class CleanTraceTui(App[None]):
             table.add_row(status["name"], "Breach Intel", enabled)
         table.add_row("tor_public_check", "Tor URL Check", "config/plugin gated")
         table.add_row("manual_evidence", "Manual Evidence", "local")
+
+    def _render_setup(self) -> None:
+        table = self.query_one("#setup", DataTable)
+        table.clear(columns=True)
+        table.add_columns("Checklist", "Ready")
+        for item in readiness_for(["social", "web", "brokers", "intel", "github", "tor"]):
+            table.add_row(item.dependency.label, "yes" if item.ready else item.reason)
+
+    def _render_graph(self, findings: list[Finding]) -> None:
+        table = self.query_one("#graph", DataTable)
+        table.clear(columns=True)
+        table.add_columns("Identity Link", "Source", "Risk")
+        for finding in findings:
+            evidence = finding.evidence
+            if evidence.get("identity_linking_risk") or "identity-link" in finding.tags:
+                left = str(evidence.get("username") or evidence.get("broker") or finding.input_type)
+                right = str(evidence.get("site") or evidence.get("category") or finding.url or "")
+                table.add_row(f"{left} -> {right}", finding.source_plugin, finding.severity)
 
 
 def run_tui() -> None:

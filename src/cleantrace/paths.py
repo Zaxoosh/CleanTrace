@@ -27,6 +27,14 @@ def plugin_state_path() -> Path:
     return config_dir() / "plugins.json"
 
 
+def scan_sessions_path() -> Path:
+    return data_dir() / "scan_sessions.json"
+
+
+def monitor_state_path() -> Path:
+    return data_dir() / "monitor_state.json"
+
+
 def database_path() -> Path:
     return data_dir() / DATABASE_FILE_NAME
 

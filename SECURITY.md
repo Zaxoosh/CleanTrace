@@ -32,6 +32,12 @@ Third-party breach-intelligence providers are disabled by default. Non-HIBP prov
 local API key and explicit terms acceptance. Provider responses must be treated as sensitive and
 CleanTrace stores metadata-only findings.
 
+Social/profile and broker modules must use public endpoints, configured search providers, or manual
+guidance. They must not bypass CAPTCHA, login walls, paywalls, anti-bot systems, or rate limits.
+
+Monitoring and alerts are local features. SMTP, webhooks, and Discord webhook style alerts must stay
+disabled by default and must not include sensitive content unless the user explicitly opts in.
+
 ## Non-Goals
 
 CleanTrace will not add features for credential attacks, CAPTCHA bypass, password reset abuse,

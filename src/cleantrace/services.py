@@ -11,9 +11,11 @@ from cleantrace.phone import dump_phone_metadata, parse_phone_number, phone_sear
 from cleantrace.plugin_state import plugin_enabled
 from cleantrace.plugins.base import PluginFinding, ScanTarget
 from cleantrace.plugins.breach_intel import scan_breach_intel as run_breach_intel
+from cleantrace.plugins.data_brokers import scan_data_brokers as run_data_brokers
 from cleantrace.plugins.github import GitHubConnectorPlugin
 from cleantrace.plugins.hibp import HIBPEmailPlugin
 from cleantrace.plugins.manager import plugins_for_input
+from cleantrace.plugins.social_profiles import scan_social_profiles as run_social_profiles
 from cleantrace.plugins.web_discovery.service import discover_public_web
 from cleantrace.security import CryptoBox, stable_hash
 
@@ -283,6 +285,49 @@ async def scan_intel(
     if not plugin_enabled("breach_intel"):
         return []
     findings = await run_breach_intel(profile, crypto, provider=provider, depth=depth)
+    stored = [upsert_finding(session, profile, finding) for finding in findings]
+    session.commit()
+    return stored
+
+
+async def scan_social(
+    session: Session,
+    crypto: CryptoBox,
+    *,
+    profile: Profile,
+    depth: str = "quick",
+    username: str | None = None,
+    category: str | None = None,
+) -> list[Finding]:
+    if profile.id is None:
+        raise ValueError("Profile must be persisted before scanning.")
+    if not plugin_enabled("social_profiles"):
+        return []
+    findings = await run_social_profiles(
+        profile,
+        crypto,
+        depth=depth,
+        username=username,
+        category=category,
+    )
+    stored = [upsert_finding(session, profile, finding) for finding in findings]
+    session.commit()
+    return stored
+
+
+async def scan_brokers(
+    session: Session,
+    crypto: CryptoBox,
+    *,
+    profile: Profile,
+    country: str | None = None,
+    depth: str = "quick",
+) -> list[Finding]:
+    if profile.id is None:
+        raise ValueError("Profile must be persisted before scanning.")
+    if not plugin_enabled("data_brokers"):
+        return []
+    findings = await run_data_brokers(profile, crypto, country=country, depth=depth)
     stored = [upsert_finding(session, profile, finding) for finding in findings]
     session.commit()
     return stored

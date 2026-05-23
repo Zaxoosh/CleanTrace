@@ -111,6 +111,19 @@ cleantrace --help
 
 ## First Run
 
+The easiest entry point is the guided scan:
+
+```powershell
+cleantrace scan wizard
+```
+
+For guided configuration first:
+
+```powershell
+cleantrace config wizard
+cleantrace config check
+```
+
 1. Initialise local config, database, and encryption key:
 
 ```powershell
@@ -195,6 +208,25 @@ Protected-role scoring gives extra weight to findings that connect identity, loc
 
 CleanTrace scans are local-first and consent-based.
 
+### Guided Scan Wizard
+
+```powershell
+cleantrace scan wizard --profile default
+cleantrace scan wizard --advanced
+cleantrace scan wizard --resume
+```
+
+The wizard walks through profile consent, scan categories, depth, provider readiness, setup prompts,
+and final recommended actions. If a selected module needs missing config, CleanTrace explains the
+privacy impact and lets you configure, skip, use a fallback, or exit. Scan sessions are stored
+locally:
+
+```powershell
+cleantrace scan sessions
+cleantrace scan resume
+cleantrace scan cancel SESSION_ID
+```
+
 ### Run Everything Configured
 
 ```powershell
@@ -235,6 +267,30 @@ src/cleantrace/plugins/sites/username_sites.yaml
 ```
 
 It records public-profile leads with confidence scores. A username match is a lead for manual review, not proof of identity.
+
+### Social/Profile Site Scan
+
+```powershell
+cleantrace scan social --profile default --depth standard
+cleantrace scan social --profile default --category gaming
+cleantrace scan social --profile default --username yourhandle
+```
+
+The social scanner uses `src/cleantrace/data/social_sites.yaml` and checks public profile endpoints
+only. It includes mainstream social, developer, gaming, creator, forum, music, and professional
+sites. Adult/sensitive categories are disabled by default.
+
+### Broker and People-Search Scan
+
+```powershell
+cleantrace scan brokers --profile default --country GB
+cleantrace brokers list
+cleantrace brokers explain "192.com"
+cleantrace brokers removal-plan --profile default --country GB
+```
+
+Broker checks produce removal opportunities and manual guidance. CleanTrace does not submit forms,
+bypass CAPTCHA, or automate identity-verification flows.
 
 ### Email Breach Checks With HIBP
 
@@ -465,6 +521,16 @@ cleantrace removal track --request REQUEST_ID --status sent
 cleantrace removal list --profile default
 ```
 
+Guided workflow:
+
+```powershell
+cleantrace removal wizard --profile default
+cleantrace removal plan --profile default --country GB
+cleantrace removal mark --finding FINDING_ID --status submitted
+cleantrace removal evidence --finding FINDING_ID --file response.eml
+cleantrace removal followup --finding FINDING_ID
+```
+
 Supported statuses:
 
 - `not started`
@@ -547,6 +613,10 @@ The TUI shows:
 - Profiles.
 - Findings.
 - Exposure score.
+- Setup checklist.
+- Provider readiness.
+- Social and broker coverage through findings.
+- Identity-link graph table.
 - Removal request status.
 
 Controls:
@@ -585,6 +655,11 @@ Show active paths:
 
 ```powershell
 cleantrace config
+cleantrace config wizard
+cleantrace config check
+cleantrace config explain
+cleantrace config providers
+cleantrace config repair
 ```
 
 Default `config.toml`:
@@ -598,6 +673,7 @@ user_sites_dir = "PATH/sites.d"
 default_depth = "quick"
 redact_output = true
 respect_robots_txt = true
+default_country = "GB"
 
 [web_discovery]
 enabled = false
@@ -625,6 +701,21 @@ socks_proxy = "socks5://127.0.0.1:9050"
 follow_links = false
 max_urls_per_scan = 10
 store_page_content = false
+
+[social_profiles]
+enabled = true
+include_sensitive_sites = false
+
+[data_brokers]
+enabled = true
+default_country = "GB"
+
+[monitoring]
+enabled = false
+
+[alerts]
+enabled = false
+include_sensitive_in_alerts = false
 
 [ai]
 provider = "none"
@@ -761,6 +852,23 @@ Current built-in plugins:
 - `breach_intel`
 - `tor_public_check`
 - `manual_evidence`
+- `social_profiles`
+- `data_brokers`
+
+## Monitoring and Alerts
+
+Monitoring is local. CleanTrace does not create a cloud service.
+
+```powershell
+cleantrace monitor enable --profile default
+cleantrace monitor run
+cleantrace monitor status
+cleantrace monitor changes
+cleantrace monitor disable
+```
+
+Use cron, Windows Task Scheduler, or a systemd user timer to run `cleantrace monitor run`. Alerts are
+disabled by default and redacted unless `alerts.include_sensitive_in_alerts = true`.
 
 Plugin state is stored locally in `plugins.json`.
 

@@ -10,6 +10,8 @@ Acceptable use:
 - Understanding risk from public identifiers and linked accounts.
 - Checking explicit user-provided public onion URLs for your own identifiers without crawling.
 - Importing lawful evidence you already have so it can be tracked and redacted locally.
+- Checking public social/profile sites and broker opt-out routes for your own identifiers.
+- Monitoring your own stored findings for local cleanup progress.
 
 Unacceptable use:
 
@@ -21,6 +23,7 @@ Unacceptable use:
 - Crawling dark-web marketplaces, stolen-data forums, or illegal content.
 - Bypassing website protections, paywalls, robots.txt, login walls, or anti-bot controls.
 - Employment screening, intimidation, or revealing hidden/private data about another person.
+- Using social or broker coverage to build target dossiers about another person.
 - Uploading private data without explicit consent.
 
 CleanTrace findings are confidence-scored leads for manual review. They are not proof that an account belongs to a person.
